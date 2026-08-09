@@ -114,12 +114,12 @@ jobs:
         run: |
           cat <<'EOF'
           Before publishing a suite installer:
-          1. Generate Tauri updater keys: npm run tauri signer generate -w ~/.tauri/omt-tools.key
+          1. Generate Tauri updater keys: bun run tauri signer generate -w ~/.tauri/omt-tools.key
           2. Put the public key into apps/launcher/src-tauri/tauri.conf.json plugins.updater.pubkey
           3. Configure Windows Authenticode certificateThumbprint
           4. Configure macOS Developer ID + notarization credentials
           5. Host signed updater JSON + artifacts on HTTPS
-          6. Run scripts/prepare-sidecars then npm run tauri build in apps/launcher
+          6. Run scripts/prepare-sidecars then bun run tauri build in apps/launcher
           EOF
 
   launcher-check:
@@ -129,9 +129,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.88"
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: "22"
+          bun-version: "1.2.19"
       - name: Checkout sibling crates
         shell: bash
         run: |
@@ -144,7 +144,7 @@ jobs:
         run: cargo check -p omt-launcher
       - name: Install frontend deps
         working-directory: apps/launcher
-        run: npm ci
+        run: bun install --frozen-lockfile
       - name: Typecheck frontend
         working-directory: apps/launcher
-        run: npx tsc --noEmit
+        run: bunx tsc --noEmit

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 type ToolCard = {
   id: string;
@@ -14,6 +15,8 @@ type Labels = {
   title: string;
   subtitle: string;
   settings: string;
+  docs: string;
+  save: string;
   language: string;
   theme: string;
   version: string;
@@ -38,7 +41,28 @@ type LauncherState = {
   };
 };
 
+type ToolVisual = {
+  accent: string;
+  icon: string;
+};
+
+const TOOL_VISUALS: Record<string, ToolVisual> = {
+  "studio-monitor": {
+    accent: "#4da3ff",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg>`,
+  },
+  "test-patterns": {
+    accent: "#ff4fa3",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4z"/><path d="M8 5v14M12 5v14M16 5v14M4 9h16M4 13h16"/></svg>`,
+  },
+  "screen-capture": {
+    accent: "#f0c14a",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="12" cy="11" r="3"/><path d="M8 21h8"/></svg>`,
+  },
+};
+
 let state: LauncherState | null = null;
+let settingsOpen = false;
 
 function $(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -48,22 +72,23 @@ function $(id: string): HTMLElement {
 
 function applyTheme(theme: string) {
   const root = document.documentElement;
-  root.dataset.theme = theme;
   if (theme === "system") {
     root.removeAttribute("data-theme");
+  } else {
+    root.dataset.theme = theme;
   }
 }
 
 function renderLabels(labels: Labels) {
-  $("title").textContent = labels.title;
-  $("subtitle").textContent = labels.subtitle;
-  $("settings-btn").textContent = labels.settings;
+  $("title").textContent = labels.title.toUpperCase();
+  $("docs-label").textContent = labels.docs;
+  $("settings-btn").setAttribute("aria-label", labels.settings);
   $("settings-title").textContent = labels.settings;
   $("language-label").textContent = labels.language;
   $("theme-label").textContent = labels.theme;
   $("version-label").textContent = labels.version;
-  $("back-btn").textContent = labels.back;
-  $("save-settings").textContent = labels.settings;
+  $("footer-version-label").textContent = labels.version;
+  $("save-settings").textContent = labels.save;
 
   const themeSelect = $("theme-select") as HTMLSelectElement;
   themeSelect.options[0].text = labels.themeSystem;
@@ -71,43 +96,101 @@ function renderLabels(labels: Labels) {
   themeSelect.options[2].text = labels.themeDark;
 }
 
+function toolVisual(id: string): ToolVisual {
+  return (
+    TOOL_VISUALS[id] ?? {
+      accent: "#888888",
+      icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="5" width="14" height="14" rx="3"/></svg>`,
+    }
+  );
+}
+
+function hideHoverCard() {
+  $("hover-card").classList.add("hidden");
+}
+
+function showHoverCard(tool: ToolCard, labels: Labels, anchor: HTMLElement) {
+  const card = $("hover-card");
+  $("hover-title").textContent = tool.title;
+  $("hover-body").textContent = tool.description;
+  $("hover-version").textContent = `v${tool.version}`;
+  const canLaunch = tool.enabled && tool.available;
+  $("hover-action").textContent = canLaunch ? labels.launch : labels.unavailable;
+
+  card.classList.remove("hidden");
+  const rect = anchor.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  let left = rect.left + rect.width / 2 - cardRect.width / 2;
+  left = Math.max(12, Math.min(left, window.innerWidth - cardRect.width - 12));
+  let top = rect.bottom + 10;
+  if (top + cardRect.height > window.innerHeight - 12) {
+    top = rect.top - cardRect.height - 10;
+  }
+  card.style.left = `${left}px`;
+  card.style.top = `${Math.max(12, top)}px`;
+}
+
 function renderTools(tools: ToolCard[], labels: Labels) {
   const grid = $("tool-grid");
   grid.innerHTML = "";
+  hideHoverCard();
+
   for (const tool of tools) {
-    const card = document.createElement("article");
-    card.className = "tool-card";
     const canLaunch = tool.enabled && tool.available;
-    card.innerHTML = `
-      <h3>${tool.title}</h3>
-      <p>${tool.description}</p>
-      <div class="meta">v${tool.version}</div>
-      <button type="button" data-tool="${tool.id}" ${canLaunch ? "" : "disabled"}>
-        ${canLaunch ? labels.launch : labels.unavailable}
-      </button>
+    const visual = toolVisual(tool.id);
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = `tool-tile${canLaunch ? "" : " is-disabled"}`;
+    tile.style.setProperty("--accent-color", visual.accent);
+    tile.dataset.tool = tool.id;
+    tile.disabled = !canLaunch;
+    tile.innerHTML = `
+      <span class="tool-icon" aria-hidden="true">${visual.icon}</span>
+      <span class="tool-name">${tool.title}</span>
     `;
-    grid.appendChild(card);
+    tile.addEventListener("mouseenter", () => showHoverCard(tool, labels, tile));
+    tile.addEventListener("mousemove", () => showHoverCard(tool, labels, tile));
+    tile.addEventListener("mouseleave", hideHoverCard);
+    tile.addEventListener("focus", () => showHoverCard(tool, labels, tile));
+    tile.addEventListener("blur", hideHoverCard);
+    if (canLaunch) {
+      tile.addEventListener("click", async () => {
+        try {
+          hideToast();
+          await invoke("launch_tool", { toolId: tool.id });
+        } catch (err) {
+          showToast(String(err));
+        }
+      });
+    }
+    grid.appendChild(tile);
   }
-  grid.querySelectorAll<HTMLButtonElement>("button[data-tool]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const toolId = btn.dataset.tool;
-      if (!toolId) return;
-      try {
-        $("status").textContent = "";
-        await invoke("launch_tool", { toolId });
-      } catch (err) {
-        $("status").textContent = String(err);
-      }
-    });
-  });
 }
 
-function renderManifest(state: LauncherState) {
-  $("suite-version").textContent = state.suiteVersion;
-  const lines = state.manifest.tools.map(
-    (t) => `${String(t.id)} ${t.version} (${t.enabled ? "enabled" : "preview"})`,
+function renderManifest(current: LauncherState) {
+  $("suite-version").textContent = current.suiteVersion;
+  $("footer-version").textContent = current.suiteVersion;
+  const lines = current.manifest.tools.map(
+    (t) => `${String(t.id)}  ${t.version}  (${t.enabled ? "enabled" : "preview"})`,
   );
   $("manifest-tools").textContent = lines.join("\n");
+}
+
+function showToast(message: string) {
+  const el = $("status");
+  el.textContent = message;
+  el.classList.toggle("hidden", !message);
+}
+
+function hideToast() {
+  showToast("");
+}
+
+function setSettingsOpen(open: boolean) {
+  settingsOpen = open;
+  $("settings-panel").classList.toggle("hidden", !open);
+  $("settings-backdrop").classList.toggle("hidden", !open);
+  $("settings-btn").setAttribute("aria-expanded", open ? "true" : "false");
 }
 
 async function refresh() {
@@ -118,16 +201,65 @@ async function refresh() {
   renderManifest(state);
   ($("language-select") as HTMLSelectElement).value = state.language;
   ($("theme-select") as HTMLSelectElement).value = state.theme;
+  document.documentElement.lang = state.language === "ja" ? "ja" : "en";
 }
 
-function showSettings(show: boolean) {
-  $("home-view").classList.toggle("hidden", show);
-  $("settings-view").classList.toggle("hidden", !show);
+/** Suppress macOS WebView beep on non-input keypresses. */
+function installBeepWorkaround() {
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      const target = event.composedPath()[0];
+      const isEditable =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable);
+      if (!isEditable) {
+        if (event.key === "Escape" && settingsOpen) {
+          setSettingsOpen(false);
+        }
+        // Keep Tab for focus movement; suppress WebView beep for other keys.
+        if (event.key !== "Tab") {
+          event.preventDefault();
+        }
+      }
+    },
+    { capture: true },
+  );
+}
+
+async function syncOsTheme() {
+  try {
+    const win = getCurrentWindow();
+    const theme = await win.theme();
+    if (theme && (!state || state.theme === "system")) {
+      // CSS already follows prefers-color-scheme when data-theme is unset.
+      document.documentElement.style.colorScheme = theme;
+    }
+    await win.onThemeChanged(({ payload }) => {
+      if (!state || state.theme === "system") {
+        document.documentElement.style.colorScheme = payload ?? "dark";
+      }
+    });
+  } catch {
+    // Running in plain browser / unsupported environment.
+  }
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
-  $("settings-btn").addEventListener("click", () => showSettings(true));
-  $("back-btn").addEventListener("click", () => showSettings(false));
+  installBeepWorkaround();
+
+  $("settings-btn").addEventListener("click", () => setSettingsOpen(!settingsOpen));
+  $("settings-backdrop").addEventListener("click", () => setSettingsOpen(false));
+  $("docs-btn").addEventListener("click", () => {
+    window.open(
+      "https://github.com/MikanseiLaboratory/omt-tools#readme",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
   $("save-settings").addEventListener("click", async () => {
     const language = ($("language-select") as HTMLSelectElement).value;
     const theme = ($("theme-select") as HTMLSelectElement).value;
@@ -140,7 +272,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       renderTools(state.tools, state.labels);
       renderManifest(state);
       $("settings-status").textContent = "OK";
-      showSettings(false);
+      setSettingsOpen(false);
     } catch (err) {
       $("settings-status").textContent = String(err);
     }
@@ -148,7 +280,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   try {
     await refresh();
+    await syncOsTheme();
   } catch (err) {
-    $("status").textContent = String(err);
+    showToast(String(err));
   }
 });

@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "lab.mikansei.omt-tools",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -14,9 +14,12 @@
     "windows": [
       {
         "title": "OMT Tools",
-        "width": 960,
-        "height": 680,
-        "resizable": true
+        "width": 920,
+        "height": 720,
+        "minWidth": 760,
+        "minHeight": 560,
+        "resizable": true,
+        "center": true
       }
     ],
     "security": {

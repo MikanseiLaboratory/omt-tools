@@ -33,7 +33,7 @@ Official `libomt` / `libomtnet` / `libvmx` are reference-only and are not modifi
 ## Prerequisites
 
 - Rust **1.88+** (edition 2024)
-- Node.js 20+ (launcher frontend)
+- Bun 1.2+ (launcher frontend)
 - Sibling checkouts:
   - `../openmediatransport-rs`
   - `../vmx-rs`
@@ -64,8 +64,8 @@ cargo run -p capture-spike -- --smoke
 
 ```bash
 cd apps/launcher
-npm install
-npm run tauri dev
+bun install
+bun run tauri dev
 ```
 
 In development the launcher looks for `omt-studio-monitor` / `omt-test-patterns` under `target/debug` or `target/release`.
@@ -80,13 +80,13 @@ cargo build --release -p omt-studio-monitor -p omt-test-patterns
 ./scripts/prepare-sidecars.sh
 
 cd apps/launcher
-npm install
-npm run tauri build
+bun install
+bun run tauri build
 ```
 
 ### Auto-update / signing checklist
 
-1. `npm run tauri signer generate -w <private-key-path>`
+1. `bun run tauri signer generate -w <private-key-path>`
 2. Set `plugins.updater.pubkey` in `apps/launcher/src-tauri/tauri.conf.json`
 3. Point `plugins.updater.endpoints` at your HTTPS release feed
 4. Enable `bundle.createUpdaterArtifacts`

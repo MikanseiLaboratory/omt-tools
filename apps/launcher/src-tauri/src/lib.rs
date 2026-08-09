@@ -37,6 +37,8 @@ struct Labels {
     title: String,
     subtitle: String,
     settings: String,
+    docs: String,
+    save: String,
     language: String,
     theme: String,
     version: String,
@@ -60,6 +62,8 @@ fn labels(lang: Language) -> Labels {
         title: t(lang, "app.title").to_string(),
         subtitle: t(lang, "launcher.subtitle").to_string(),
         settings: t(lang, "settings").to_string(),
+        docs: t(lang, "docs").to_string(),
+        save: t(lang, "save").to_string(),
         language: t(lang, "language").to_string(),
         theme: t(lang, "theme").to_string(),
         version: t(lang, "version").to_string(),
@@ -147,6 +151,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // No native application menu — keep chrome minimal like NDI Tools.
+        .menu(|app| Ok(tauri::menu::Menu::new(app)?))
         .invoke_handler(tauri::generate_handler![
             get_launcher_state,
             save_settings,
