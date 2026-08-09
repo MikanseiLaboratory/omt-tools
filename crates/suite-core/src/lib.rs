@@ -3,11 +3,15 @@
 #![deny(missing_docs)]
 
 mod config;
+mod fonts;
 mod i18n;
 mod theme;
 mod version;
 
 pub use config::{SuiteConfig, config_path, load_config, save_config};
+#[cfg(feature = "egui-fonts")]
+pub use fonts::install_egui_cjk_fonts;
+pub use fonts::load_cjk_font_bytes;
 pub use i18n::{Language, t};
 pub use theme::ThemePreference;
 pub use version::{SUITE_VERSION, SuiteManifest, ToolId, ToolInfo, suite_manifest};

@@ -42,7 +42,7 @@ jobs:
           git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
           git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
       - name: Clippy (workspace libs/tools)
-        run: cargo clippy -p suite-core -p omt-media -p pattern-generator -p monitor-bench -p capture-spike -p omt-studio-monitor -p omt-studio-monitor-gpui -p omt-test-patterns --all-targets -- -D warnings
+        run: cargo clippy -p suite-core -p omt-media -p pattern-generator -p monitor-bench -p capture-spike -p omt-studio-monitor -p omt-test-patterns --all-targets -- -D warnings
       - name: Test
         run: cargo test -p suite-core -p omt-media -p pattern-generator -p monitor-bench -p capture-spike
 

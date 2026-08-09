@@ -21,6 +21,7 @@ type Labels = {
   theme: string;
   version: string;
   launch: string;
+  launching: string;
   back: string;
   themeLight: string;
   themeDark: string;
@@ -63,6 +64,10 @@ const TOOL_VISUALS: Record<string, ToolVisual> = {
 
 let state: LauncherState | null = null;
 let settingsOpen = false;
+/** toolId -> clearTimeout handle while launch feedback is visible */
+const launchingTimers = new Map<string, number>();
+/** Keep tile feedback after spawn() returns — window paint usually lags. */
+const LAUNCH_FEEDBACK_MS = 4500;
 
 function $(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -105,60 +110,72 @@ function toolVisual(id: string): ToolVisual {
   );
 }
 
-function hideHoverCard() {
-  $("hover-card").classList.add("hidden");
+function setTileLaunching(tile: HTMLButtonElement, launching: boolean, label: string) {
+  tile.classList.toggle("is-launching", launching);
+  tile.disabled = launching || tile.classList.contains("is-disabled");
+  const status = tile.querySelector(".tool-launch-status");
+  if (status) {
+    status.textContent = launching ? label : "";
+  }
+  tile.setAttribute("aria-busy", launching ? "true" : "false");
 }
 
-function showHoverCard(tool: ToolCard, labels: Labels, anchor: HTMLElement) {
-  const card = $("hover-card");
-  $("hover-title").textContent = tool.title;
-  $("hover-body").textContent = tool.description;
-  $("hover-version").textContent = `v${tool.version}`;
-  const canLaunch = tool.enabled && tool.available;
-  $("hover-action").textContent = canLaunch ? labels.launch : labels.unavailable;
-
-  card.classList.remove("hidden");
-  const rect = anchor.getBoundingClientRect();
-  const cardRect = card.getBoundingClientRect();
-  let left = rect.left + rect.width / 2 - cardRect.width / 2;
-  left = Math.max(12, Math.min(left, window.innerWidth - cardRect.width - 12));
-  let top = rect.bottom + 10;
-  if (top + cardRect.height > window.innerHeight - 12) {
-    top = rect.top - cardRect.height - 10;
+function clearLaunchFeedback(toolId: string) {
+  const timer = launchingTimers.get(toolId);
+  if (timer !== undefined) {
+    window.clearTimeout(timer);
+    launchingTimers.delete(toolId);
   }
-  card.style.left = `${left}px`;
-  card.style.top = `${Math.max(12, top)}px`;
+  const tile = document.querySelector<HTMLButtonElement>(`.tool-tile[data-tool="${toolId}"]`);
+  if (tile && state) {
+    setTileLaunching(tile, false, state.labels.launching);
+  }
 }
 
 function renderTools(tools: ToolCard[], labels: Labels) {
   const grid = $("tool-grid");
   grid.innerHTML = "";
-  hideHoverCard();
 
   for (const tool of tools) {
     const canLaunch = tool.enabled && tool.available;
     const visual = toolVisual(tool.id);
+    const wasLaunching = launchingTimers.has(tool.id);
     const tile = document.createElement("button");
     tile.type = "button";
-    tile.className = `tool-tile${canLaunch ? "" : " is-disabled"}`;
+    tile.className = `tool-tile${canLaunch ? "" : " is-disabled"}${wasLaunching ? " is-launching" : ""}`;
     tile.style.setProperty("--accent-color", visual.accent);
     tile.dataset.tool = tool.id;
-    tile.disabled = !canLaunch;
+    tile.disabled = !canLaunch || wasLaunching;
+    tile.setAttribute("aria-busy", wasLaunching ? "true" : "false");
+    tile.setAttribute("aria-label", `${tool.title}. ${tool.description}`);
     tile.innerHTML = `
       <span class="tool-icon" aria-hidden="true">${visual.icon}</span>
-      <span class="tool-name">${tool.title}</span>
+      <span class="tool-copy">
+        <span class="tool-name">${tool.title}</span>
+        <span class="tool-desc">${tool.description}</span>
+        <span class="tool-launch-status">${wasLaunching ? labels.launching : ""}</span>
+      </span>
+      <span class="tool-spinner" aria-hidden="true"></span>
     `;
-    tile.addEventListener("mouseenter", () => showHoverCard(tool, labels, tile));
-    tile.addEventListener("mousemove", () => showHoverCard(tool, labels, tile));
-    tile.addEventListener("mouseleave", hideHoverCard);
-    tile.addEventListener("focus", () => showHoverCard(tool, labels, tile));
-    tile.addEventListener("blur", hideHoverCard);
     if (canLaunch) {
       tile.addEventListener("click", async () => {
+        if (launchingTimers.has(tool.id)) return;
+        hideToast();
+        setTileLaunching(tile, true, labels.launching);
+        // Placeholder until spawn returns; blocks double-clicks during invoke.
+        launchingTimers.set(tool.id, 0);
+        const started = Date.now();
         try {
-          hideToast();
           await invoke("launch_tool", { toolId: tool.id });
+          const remaining = Math.max(0, LAUNCH_FEEDBACK_MS - (Date.now() - started));
+          const timer = window.setTimeout(() => {
+            launchingTimers.delete(tool.id);
+            setTileLaunching(tile, false, labels.launching);
+          }, remaining);
+          launchingTimers.set(tool.id, timer);
         } catch (err) {
+          clearLaunchFeedback(tool.id);
+          setTileLaunching(tile, false, labels.launching);
           showToast(String(err));
         }
       });

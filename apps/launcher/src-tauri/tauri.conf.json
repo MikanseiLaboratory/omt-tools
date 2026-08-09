@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "lab.mikansei.omt-tools",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "bun run dev:frontend",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"

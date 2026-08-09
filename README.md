@@ -7,8 +7,7 @@ Open Media Transport production utilities inspired by NDI Tools.
 | Tool | Status | Description |
 |------|--------|-------------|
 | **Launcher** (Tauri) | MVP | Starts bundled tools, language/theme settings, suite version |
-| **Studio Monitor** (egui) | MVP | Discover and view OMT sources on the LAN |
-| **Studio Monitor** (GPUI) | Prototype | Temporary GPUI alternate for A/B comparison |
+| **Studio Monitor** (GPUI) | MVP | Discover and view OMT sources on the LAN |
 | **Test Patterns** (egui) | MVP | Send SMPTE-style patterns + tone over OMT |
 | **Screen Capture** | Spike | Windows Graphics Capture / ScreenCaptureKit probe |
 
@@ -17,13 +16,12 @@ Open Media Transport production utilities inspired by NDI Tools.
 ```text
 omt-tools/
   apps/launcher/             Tauri launcher (frontend + src-tauri)
-  apps/studio-monitor/       egui viewer (product default)
-  apps/studio-monitor-gpui/  GPUI viewer (temporary A/B)
+  apps/studio-monitor/       GPUI viewer
   apps/test-patterns/        egui sender
   crates/suite-core/         settings, i18n, versions
   crates/omt-media/          discovery / receive / send helpers
   crates/pattern-generator/
-  crates/monitor-bench/      headless A/B harness
+  crates/monitor-bench/      headless present-path harness
   crates/capture-spike/
 ```
 
@@ -49,12 +47,10 @@ cargo run -p omt-test-patterns
 # Prefer release for realtime encode/view
 cargo run --release -p omt-test-patterns
 cargo run --release -p omt-studio-monitor
-cargo run --release -p omt-studio-monitor-gpui
 
-# Headless A/B (receive + present-path simulation)
+# Headless present-path bench
 cargo run --release -p omt-studio-monitor -- --headless --url omt://127.0.0.1:6400/Test --seconds 10
-cargo run --release -p omt-studio-monitor-gpui -- --headless --url omt://127.0.0.1:6400/Test --seconds 10
-# or: ./scripts/ab-monitor-bench.ps1 -Url omt://...
+# or: ./scripts/monitor-bench.ps1 -Url omt://...
 
 # Screen capture spike
 cargo run -p capture-spike -- --smoke
@@ -63,12 +59,22 @@ cargo run -p capture-spike -- --smoke
 ### Launcher
 
 ```bash
+# From repo root (recommended)
+bun install --cwd apps/launcher
+bun run tools:build   # once: so Studio Monitor / Test Patterns resolve
+bun run dev           # tauri dev + Vite HMR for the launcher UI
+
+# Or from apps/launcher
 cd apps/launcher
 bun install
-bun run tauri dev
+bun run tools:build
+bun run dev
 ```
 
-In development the launcher looks for `omt-studio-monitor` / `omt-test-patterns` under `target/debug` or `target/release`.
+`bun run dev` runs `tauri dev`, which starts Vite (`dev:frontend`) for launcher HMR.
+Native tools are separate processes — rebuild with `bun run tools:build` (or `cargo build -p …`) after Rust changes; they do not hot-reload.
+
+In development the launcher looks for `omt-studio-monitor` and `omt-test-patterns` under `target/debug` or `target/release`.
 
 ## Package (suite install)
 

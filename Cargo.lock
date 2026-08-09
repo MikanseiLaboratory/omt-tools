@@ -5831,24 +5831,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "eframe",
- "egui",
- "monitor-bench",
- "omt-media",
- "suite-core",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "omt-studio-monitor-gpui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
  "gpui",
+ "image",
  "monitor-bench",
  "omt-media",
+ "smallvec",
  "suite-core",
  "tracing",
  "tracing-subscriber",
@@ -8120,6 +8107,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "directories",
+ "egui",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -9600,6 +9588,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vmx"
 version = "0.1.0"
 dependencies = [
+ "rayon",
  "thiserror 2.0.20",
 ]
 

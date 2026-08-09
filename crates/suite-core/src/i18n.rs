@@ -73,6 +73,8 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::Japanese, "version") => "バージョン",
         (Language::English, "launch") => "Launch",
         (Language::Japanese, "launch") => "起動",
+        (Language::English, "launching") => "Launching…",
+        (Language::Japanese, "launching") => "起動中…",
         (Language::English, "back") => "Back",
         (Language::Japanese, "back") => "戻る",
         (Language::English, "theme.light") => "Light",

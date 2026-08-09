@@ -13,7 +13,7 @@
   --accent: #e11d2e;
   --shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
   --radius: 14px;
-  --font: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font: "Segoe UI", "Yu Gothic UI", "Meiryo", "Hiragino Sans", "Helvetica Neue", Arial, sans-serif;
   font-family: var(--font);
   font-size: 15px;
   line-height: 1.35;
@@ -172,9 +172,9 @@ select {
   border: 1px solid var(--tile-border);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
   transition:
-    transform 120ms ease,
-    border-color 120ms ease,
-    background 120ms ease;
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
 }
 
 .tool-tile:hover,
@@ -193,6 +193,115 @@ select {
   pointer-events: none;
 }
 
+.tool-tile.is-launching {
+  opacity: 1;
+  pointer-events: none;
+  border-color: color-mix(in srgb, var(--accent-color, #888) 70%, var(--tile-border));
+  background: color-mix(in srgb, var(--accent-color, #888) 10%, var(--tile));
+}
+
+.tool-tile.is-launching .tool-spinner {
+  opacity: 1;
+}
+
+.tool-tile.is-launching .tool-launch-status {
+  opacity: 1;
+  max-height: 1.4em;
+  margin-top: 2px;
+}
+
+.tool-tile.is-launching .tool-desc {
+  opacity: 0;
+  max-height: 0;
+  margin-top: 0;
+  transition-delay: 0ms;
+}
+
+.tool-tile.is-launching .tool-name {
+  font-size: 16px;
+}
+
+.tool-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.tool-name {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  transform-origin: left center;
+  transition: font-size 220ms ease, line-height 220ms ease;
+}
+
+.tool-tile:hover .tool-name,
+.tool-tile:focus-visible .tool-name {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.tool-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  margin-top: 0;
+  transition:
+    opacity 200ms ease,
+    max-height 220ms ease,
+    margin-top 220ms ease;
+}
+
+.tool-tile:hover .tool-desc,
+.tool-tile:focus-visible .tool-desc {
+  opacity: 1;
+  max-height: 3.2em;
+  margin-top: 6px;
+  transition:
+    opacity 240ms ease 80ms,
+    max-height 220ms ease,
+    margin-top 220ms ease;
+}
+
+.tool-launch-status {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  margin-top: 0;
+  transition:
+    opacity 180ms ease,
+    max-height 180ms ease,
+    margin-top 180ms ease;
+}
+
+.tool-spinner {
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent-color, #888) 35%, transparent);
+  border-top-color: var(--accent-color, #888);
+  opacity: 0;
+  flex: 0 0 auto;
+  animation: tool-spin 0.7s linear infinite;
+}
+
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .tool-icon {
   width: 64px;
   height: 64px;
@@ -208,55 +317,6 @@ select {
 .tool-icon svg {
   width: 30px;
   height: 30px;
-}
-
-.tool-name {
-  font-size: 28px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  line-height: 1.1;
-}
-
-.tool-detail {
-  display: none;
-}
-
-.hover-card {
-  position: fixed;
-  z-index: 50;
-  width: min(320px, calc(100vw - 24px));
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: var(--panel);
-  border: 1px solid var(--tile-border);
-  box-shadow: var(--shadow);
-  pointer-events: none;
-}
-
-.hover-card-title {
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.hover-card-body {
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.4;
-}
-
-.hover-card-meta {
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--muted);
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.hover-card-meta strong {
-  color: var(--accent);
-  font-weight: 600;
 }
 
 .footer {
@@ -422,6 +482,12 @@ select {
 
   .tool-name {
     font-size: 22px;
+  }
+
+  .tool-tile:hover .tool-name,
+  .tool-tile:focus-visible .tool-name,
+  .tool-tile.is-launching .tool-name {
+    font-size: 15px;
   }
 
   .footer {

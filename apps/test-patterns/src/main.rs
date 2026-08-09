@@ -38,6 +38,7 @@ fn main() -> anyhow::Result<()> {
         title,
         options,
         Box::new(move |cc| {
+            suite_core::install_egui_cjk_fonts(&cc.egui_ctx);
             apply_theme(&cc.egui_ctx, overrides.theme);
             Ok(Box::new(app::PatternsApp::new(cc, overrides.language)))
         }),

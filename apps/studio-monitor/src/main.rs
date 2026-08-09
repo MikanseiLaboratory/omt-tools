@@ -1,14 +1,17 @@
-//! OMT Studio Monitor — LAN source browser and viewer.
+//! OMT Studio Monitor (GPUI).
+//!
+//! Headless performance run:
+//! ```text
+//! cargo run --release -p omt-studio-monitor -- --headless --url omt://... --seconds 10
+//! ```
 
-mod app;
-mod spike;
 mod ui;
 
 use std::time::Duration;
 
 use clap::Parser;
 use monitor_bench::{BenchBackend, BenchOptions, print_report, run_headless};
-use suite_core::{LaunchOverrides, ThemePreference, t};
+use suite_core::{LaunchOverrides, t};
 
 #[derive(Debug, Parser)]
 #[command(name = "omt-studio-monitor", about = "OMT Studio Monitor")]
@@ -22,7 +25,7 @@ struct Args {
     /// Optional initial `omt://` URL.
     #[arg(long)]
     url: Option<String>,
-    /// Run without opening a window (A/B performance harness).
+    /// Run without opening a window (performance harness).
     #[arg(long, default_value_t = false)]
     headless: bool,
     /// Headless duration in seconds after the first frame.
@@ -54,7 +57,7 @@ fn main() -> anyhow::Result<()> {
             .clone()
             .ok_or_else(|| anyhow::anyhow!("--headless requires --url omt://..."))?;
         let report = run_headless(BenchOptions {
-            backend: BenchBackend::Egui,
+            backend: BenchBackend::Gpui,
             url,
             duration: Duration::from_secs(args.seconds),
             connect_timeout: Duration::from_secs(args.connect_timeout),
@@ -64,34 +67,6 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let title = t(overrides.language, "tool.studio_monitor");
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 720.0])
-            .with_title(title),
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        title,
-        options,
-        Box::new(move |cc| {
-            apply_theme(&cc.egui_ctx, overrides.theme);
-            Ok(Box::new(app::MonitorApp::new(
-                cc,
-                overrides.language,
-                overrides.theme,
-                args.url.clone(),
-            )))
-        }),
-    )
-    .map_err(|e| anyhow::anyhow!("eframe error: {e}"))
-}
-
-fn apply_theme(ctx: &egui::Context, theme: ThemePreference) {
-    match theme {
-        ThemePreference::Light => ctx.set_visuals(egui::Visuals::light()),
-        ThemePreference::Dark => ctx.set_visuals(egui::Visuals::dark()),
-        ThemePreference::System => {}
-    }
+    let title = t(overrides.language, "tool.studio_monitor").to_string();
+    ui::run_gpui(title, overrides.language, args.url)
 }

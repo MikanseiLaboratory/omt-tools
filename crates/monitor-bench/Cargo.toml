@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Headless Studio Monitor A/B performance harness (egui vs gpui present paths)"
+description = "Headless Studio Monitor present-path performance harness"
 
 [dependencies]
 anyhow.workspace = true

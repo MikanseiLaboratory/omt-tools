@@ -7,7 +7,6 @@ members = [
     "crates/monitor-bench",
     "crates/capture-spike",
     "apps/studio-monitor",
-    "apps/studio-monitor-gpui",
     "apps/test-patterns",
     "apps/launcher/src-tauri",
 ]
@@ -17,7 +16,6 @@ default-members = [
     "crates/pattern-generator",
     "crates/monitor-bench",
     "apps/studio-monitor",
-    "apps/studio-monitor-gpui",
     "apps/test-patterns",
 ]
 

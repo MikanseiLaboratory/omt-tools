@@ -1,4 +1,4 @@
-//! Headless Studio Monitor A/B harness shared by egui and gpui binaries.
+//! Headless Studio Monitor present-path harness.
 
 #![deny(missing_docs)]
 
@@ -13,8 +13,6 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BenchBackend {
-    /// egui ColorImage / texture upload simulation.
-    Egui,
     /// GPUI image present simulation.
     Gpui,
     /// Conversion only (baseline, no present simulation).
@@ -25,7 +23,6 @@ impl BenchBackend {
     /// Stable CLI / report id.
     pub const fn id(self) -> &'static str {
         match self {
-            Self::Egui => "egui",
             Self::Gpui => "gpui",
             Self::Null => "null",
         }
@@ -176,19 +173,10 @@ pub fn run_headless(opts: BenchOptions) -> Result<BenchReport> {
 }
 
 fn present_frame(backend: BenchBackend, bgra: &[u8], rgba: &mut Vec<u8>) {
-    // Shared convert step — both UI toolkits ultimately need RGBA/texture-friendly pixels.
+    // Shared convert step — UI toolkits ultimately need RGBA/texture-friendly pixels.
     *rgba = bgra_to_rgba(bgra);
     match backend {
         BenchBackend::Null => {}
-        BenchBackend::Egui => {
-            // Approximate egui ColorImage::from_rgba_unmultiplied + texture set:
-            // touch every pixel once more as if packing into a CPU texture staging buffer.
-            let mut checksum = 0u32;
-            for b in rgba.iter() {
-                checksum = checksum.wrapping_add(*b as u32);
-            }
-            std::hint::black_box(checksum);
-        }
         BenchBackend::Gpui => {
             // Approximate GPUI image element upload: stride-aware copy into an aligned staging buf.
             let aligned = (rgba.len() + 255) & !255;
@@ -238,7 +226,7 @@ mod tests {
 
     #[test]
     fn backend_ids() {
-        assert_eq!(BenchBackend::Egui.id(), "egui");
         assert_eq!(BenchBackend::Gpui.id(), "gpui");
+        assert_eq!(BenchBackend::Null.id(), "null");
     }
 }
