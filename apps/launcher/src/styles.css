@@ -1,0 +1,162 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Segoe UI", Inter, system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  color: #15202b;
+  background: #f3f5f8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+:root[data-theme="light"] {
+  color: #15202b;
+  background: #f3f5f8;
+}
+
+:root[data-theme="dark"] {
+  color: #edf2f7;
+  background: #12161c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color: #edf2f7;
+    background: #12161c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 28px 24px 40px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 8px;
+}
+
+.subtitle {
+  margin: 0;
+  opacity: 0.72;
+}
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.tool-card {
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 14px;
+  padding: 18px;
+  background: color-mix(in srgb, canvas 88%, currentColor 4%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 180px;
+}
+
+.tool-card p {
+  margin: 0;
+  flex: 1;
+  opacity: 0.85;
+}
+
+.tool-card .meta {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  max-width: 320px;
+}
+
+.version-box {
+  margin: 18px 0;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.version-box pre {
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+}
+
+button,
+select {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  padding: 0.55em 1em;
+  font: inherit;
+  background: #fff;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button.ghost {
+  background: transparent;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) button,
+  :root:not([data-theme="light"]) select {
+    background: #1b222c;
+  }
+}
+
+:root[data-theme="dark"] button,
+:root[data-theme="dark"] select {
+  background: #1b222c;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.status {
+  min-height: 1.2em;
+  color: #c0392b;
+  margin-top: 16px;
+}

@@ -1,0 +1,150 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+          components: rustfmt
+      - name: Checkout sibling crates
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
+      - run: cargo fmt --all -- --check
+
+  clippy-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+          components: clippy
+      - name: Checkout sibling crates
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
+      - name: Clippy (workspace libs/tools)
+        run: cargo clippy -p suite-core -p omt-media -p pattern-generator -p monitor-bench -p capture-spike -p omt-studio-monitor -p omt-studio-monitor-gpui -p omt-test-patterns --all-targets -- -D warnings
+      - name: Test
+        run: cargo test -p suite-core -p omt-media -p pattern-generator -p monitor-bench -p capture-spike
+
+  build-tools:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+          targets: ${{ matrix.target }}
+      - name: Checkout sibling crates
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
+      - name: Build release tools
+        run: cargo build --release --target ${{ matrix.target }} -p omt-studio-monitor -p omt-test-patterns -p capture-spike
+      - name: Upload tool artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tools-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/omt-studio-monitor*
+            target/${{ matrix.target }}/release/omt-test-patterns*
+            target/${{ matrix.target }}/release/omt-screen-capture-spike*
+
+  build-windows-arm64:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+          targets: aarch64-pc-windows-msvc
+      - name: Checkout sibling crates
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
+      - name: Build Windows Arm64 tools
+        run: cargo build --release --target aarch64-pc-windows-msvc -p omt-studio-monitor -p omt-test-patterns -p capture-spike
+      - name: Upload tool artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tools-aarch64-pc-windows-msvc
+          path: |
+            target/aarch64-pc-windows-msvc/release/omt-studio-monitor*
+            target/aarch64-pc-windows-msvc/release/omt-test-patterns*
+            target/aarch64-pc-windows-msvc/release/omt-screen-capture-spike*
+
+  release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Signing checklist
+        run: |
+          cat <<'EOF'
+          Before publishing a suite installer:
+          1. Generate Tauri updater keys: npm run tauri signer generate -w ~/.tauri/omt-tools.key
+          2. Put the public key into apps/launcher/src-tauri/tauri.conf.json plugins.updater.pubkey
+          3. Configure Windows Authenticode certificateThumbprint
+          4. Configure macOS Developer ID + notarization credentials
+          5. Host signed updater JSON + artifacts on HTTPS
+          6. Run scripts/prepare-sidecars then npm run tauri build in apps/launcher
+          EOF
+
+  launcher-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Checkout sibling crates
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git ../openmediatransport-rs
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git ../vmx-rs
+      - name: Ensure sidecar placeholders
+        shell: pwsh
+        run: ./scripts/ensure-sidecar-placeholders.ps1
+      - name: Check launcher crate
+        run: cargo check -p omt-launcher
+      - name: Install frontend deps
+        working-directory: apps/launcher
+        run: npm ci
+      - name: Typecheck frontend
+        working-directory: apps/launcher
+        run: npx tsc --noEmit

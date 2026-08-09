@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OMT Tools</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <div>
+          <h1 id="title">OMT Tools</h1>
+          <p id="subtitle" class="subtitle"></p>
+        </div>
+        <button id="settings-btn" class="ghost" type="button">Settings</button>
+      </header>
+
+      <section id="home-view" class="view">
+        <div id="tool-grid" class="tool-grid"></div>
+      </section>
+
+      <section id="settings-view" class="view hidden">
+        <h2 id="settings-title">Settings</h2>
+        <label class="field">
+          <span id="language-label">Language</span>
+          <select id="language-select">
+            <option value="en">English</option>
+            <option value="ja">日本語</option>
+          </select>
+        </label>
+        <label class="field">
+          <span id="theme-label">Theme</span>
+          <select id="theme-select">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <div class="version-box">
+          <div id="version-label">Version</div>
+          <code id="suite-version"></code>
+          <pre id="manifest-tools"></pre>
+        </div>
+        <div class="row">
+          <button id="save-settings" type="button">Save</button>
+          <button id="back-btn" class="ghost" type="button">Back</button>
+        </div>
+        <p id="settings-status" class="status"></p>
+      </section>
+
+      <p id="status" class="status"></p>
+    </main>
+  </body>
+</html>

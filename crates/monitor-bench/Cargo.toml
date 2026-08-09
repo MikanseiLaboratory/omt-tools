@@ -1,0 +1,16 @@
+[package]
+name = "monitor-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Headless Studio Monitor A/B performance harness (egui vs gpui present paths)"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+omt-media.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tracing.workspace = true

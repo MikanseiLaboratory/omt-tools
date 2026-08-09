@@ -1,0 +1,14 @@
+/target
+**/target
+dist/
+*.log
+.DS_Store
+Thumbs.db
+apps/launcher/dist
+apps/launcher/src-tauri/gen
+apps/launcher/src-tauri/target
+node_modules/
+.vscode/
+.idea/
+*.pdb
+received_frames/

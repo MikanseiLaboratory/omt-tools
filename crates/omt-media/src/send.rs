@@ -1,0 +1,390 @@
+//! OMT send session with paced video + tone audio.
+
+use std::f32::consts::TAU;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use openmediatransport::{
+    Codec, ColorSpace, Discovery, FrameType, MediaFrame, NETWORK_ASYNC_COUNT, NETWORK_SEND_BUFFER,
+    NETWORK_SEND_RECEIVE_BUFFER, OmtError, Sender, SenderConfig, SenderInfo,
+};
+use parking_lot::Mutex;
+use vmx::{Codec as VmxCodec, Config as VmxConfig, Profile};
+
+const TICKS_PER_SECOND: i64 = 10_000_000;
+
+/// Audio tone configuration.
+#[derive(Debug, Clone)]
+pub struct AudioToneConfig {
+    /// Sample rate (Hz).
+    pub sample_rate: i32,
+    /// Channel count.
+    pub channels: i32,
+    /// Tone frequency (Hz).
+    pub tone_hz: f32,
+    /// Samples per packet (default 480 = 10 ms @ 48 kHz).
+    pub samples: i32,
+}
+
+impl Default for AudioToneConfig {
+    fn default() -> Self {
+        Self {
+            sample_rate: 48_000,
+            channels: 2,
+            tone_hz: 1000.0,
+            samples: 480,
+        }
+    }
+}
+
+/// Configuration for an outbound test / capture session.
+#[derive(Debug, Clone)]
+pub struct SendSessionConfig {
+    /// Discoverable source name.
+    pub name: String,
+    /// Frame width.
+    pub width: i32,
+    /// Frame height.
+    pub height: i32,
+    /// Frame rate numerator.
+    pub fps_n: i32,
+    /// Frame rate denominator.
+    pub fps_d: i32,
+    /// VMX profile.
+    pub profile: Profile,
+    /// Whether UYVY content changes every frame.
+    pub animate: bool,
+    /// Audio tone settings.
+    pub audio: AudioToneConfig,
+}
+
+impl Default for SendSessionConfig {
+    fn default() -> Self {
+        Self {
+            name: "Test Pattern".into(),
+            width: 1920,
+            height: 1080,
+            fps_n: 30,
+            fps_d: 1,
+            profile: Profile::OmtSq,
+            animate: true,
+            audio: AudioToneConfig::default(),
+        }
+    }
+}
+
+/// Live send statistics snapshot.
+#[derive(Debug, Clone, Default)]
+pub struct SendStats {
+    /// Approximate video FPS over the last window.
+    pub video_fps: f32,
+    /// Average encode time in milliseconds.
+    pub encode_ms: f32,
+    /// Frames submitted.
+    pub frames: i64,
+    /// Frames dropped by the sender queue.
+    pub dropped: i64,
+    /// True when encode cannot sustain target FPS.
+    pub behind: bool,
+    /// Listening TCP port.
+    pub port: u16,
+}
+
+type FrameProvider = Arc<dyn Fn(u64) -> Vec<u8> + Send + Sync>;
+
+/// Background OMT sender owning video + audio threads.
+pub struct SendSession {
+    running: Arc<AtomicBool>,
+    stats: Arc<Mutex<SendStats>>,
+    joins: Vec<thread::JoinHandle<()>>,
+}
+
+impl SendSession {
+    /// Start sending frames produced by `provider` (returns UYVY bytes per frame index).
+    pub fn start(config: SendSessionConfig, provider: FrameProvider) -> Result<Self, OmtError> {
+        let sender = Arc::new(Mutex::new(Sender::create_with_config(
+            &config.name,
+            FrameType::VIDEO | FrameType::AUDIO | FrameType::METADATA,
+            SenderConfig {
+                send_buffer: NETWORK_SEND_BUFFER,
+                recv_buffer: NETWORK_SEND_RECEIVE_BUFFER,
+                send_queue_depth: NETWORK_ASYNC_COUNT,
+            },
+        )?));
+        {
+            let mut s = sender.lock();
+            s.set_sender_info(SenderInfo::new(
+                "OMT Tools",
+                "MikanseiLaboratory",
+                env!("CARGO_PKG_VERSION"),
+            ));
+        }
+        let port = sender.lock().port();
+        {
+            let name = config.name.clone();
+            let mut discovery = Discovery::new()?;
+            discovery.register(&name, port)?;
+            // Keep advertisement alive for process lifetime by leaking the discovery handle.
+            std::mem::forget(discovery);
+        }
+
+        let running = Arc::new(AtomicBool::new(true));
+        let stats = Arc::new(Mutex::new(SendStats {
+            port,
+            ..Default::default()
+        }));
+        let epoch = Instant::now();
+
+        let audio_running = Arc::clone(&running);
+        let audio_sender = Arc::clone(&sender);
+        let audio_cfg = config.audio.clone();
+        let audio_join = thread::Builder::new()
+            .name("omt-send-audio".into())
+            .spawn(move || audio_loop(audio_sender, audio_cfg, audio_running, epoch))?;
+
+        let video_running = Arc::clone(&running);
+        let video_sender = Arc::clone(&sender);
+        let video_stats = Arc::clone(&stats);
+        let video_cfg = config.clone();
+        let video_join = thread::Builder::new()
+            .name("omt-send-video".into())
+            .spawn(move || {
+                video_loop(
+                    video_sender,
+                    video_cfg,
+                    provider,
+                    video_running,
+                    video_stats,
+                    epoch,
+                );
+            })?;
+
+        Ok(Self {
+            running,
+            stats,
+            joins: vec![audio_join, video_join],
+        })
+    }
+
+    /// Snapshot of send statistics.
+    pub fn stats(&self) -> SendStats {
+        self.stats.lock().clone()
+    }
+
+    /// Stop threads.
+    pub fn stop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+        for join in self.joins.drain(..) {
+            let _ = join.join();
+        }
+    }
+}
+
+impl Drop for SendSession {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn audio_loop(
+    sender: Arc<Mutex<Sender>>,
+    cfg: AudioToneConfig,
+    running: Arc<AtomicBool>,
+    epoch: Instant,
+) {
+    let mut audio_buf = Vec::new();
+    let mut phase = 0.0f64;
+    let samples = cfg.samples.max(1) as i64;
+    let rate = cfg.sample_rate.max(1) as i64;
+    let mut samples_sent = 0i64;
+
+    while running.load(Ordering::Relaxed) {
+        let want = sender.lock().audio_subscribed();
+        if !want {
+            thread::sleep(Duration::from_millis(10));
+            continue;
+        }
+        let due = Duration::from_secs_f64(samples_sent as f64 / rate as f64);
+        let now = epoch.elapsed();
+        if due > now {
+            thread::sleep(due - now);
+        } else if now > due + Duration::from_millis(50) {
+            samples_sent = (now.as_secs_f64() * rate as f64).round() as i64;
+            samples_sent -= samples_sent % samples;
+        }
+        audio_buf.clear();
+        append_sine_planar(
+            &mut audio_buf,
+            cfg.channels,
+            samples as i32,
+            cfg.sample_rate,
+            cfg.tone_hz,
+            &mut phase,
+        );
+        let timestamp = samples_sent.saturating_mul(TICKS_PER_SECOND) / rate;
+        samples_sent += samples;
+        let frame = MediaFrame {
+            frame_type: FrameType::AUDIO,
+            timestamp,
+            codec: Codec::Fpa1 as i32,
+            sample_rate: cfg.sample_rate,
+            channels: cfg.channels,
+            samples_per_channel: samples as i32,
+            active_channels: 0,
+            data: std::mem::take(&mut audio_buf),
+            ..Default::default()
+        };
+        let _ = sender.lock().send_audio(frame);
+    }
+}
+
+fn video_loop(
+    sender: Arc<Mutex<Sender>>,
+    cfg: SendSessionConfig,
+    provider: FrameProvider,
+    running: Arc<AtomicBool>,
+    stats: Arc<Mutex<SendStats>>,
+    epoch: Instant,
+) {
+    let Ok(mut vmx) = VmxCodec::new(VmxConfig {
+        width: cfg.width,
+        height: cfg.height,
+        profile: cfg.profile,
+        color_space: vmx::ColorSpace::Undefined,
+    }) else {
+        return;
+    };
+
+    let stride = (cfg.width as usize) * 2;
+    let mut vmx_buf = vec![0u8; 8 << 20];
+    let mut cached: Option<Vec<u8>> = None;
+    let mut frame_idx = 0u64;
+    let mut last_stats = Instant::now();
+    let mut encode_us_acc = 0u64;
+    let mut video_sent = 0u64;
+    let video_interval =
+        (cfg.fps_d as i64).saturating_mul(TICKS_PER_SECOND) / cfg.fps_n.max(1) as i64;
+    let target_fps = cfg.fps_n as f64 / cfg.fps_d.max(1) as f64;
+
+    if !cfg.animate {
+        let uyvy = provider(0);
+        if uyvy.len() == stride * cfg.height as usize
+            && vmx.encode_uyvy(&uyvy, stride).is_ok()
+            && let Ok(n) = vmx.save_to(&mut vmx_buf)
+        {
+            cached = Some(vmx_buf[..n].to_vec());
+        }
+    }
+
+    while running.load(Ordering::Relaxed) {
+        {
+            let mut s = sender.lock();
+            let _ = s.poll_accept();
+            let _ = s.poll_peer_metadata();
+            if !s.video_subscribed() {
+                drop(s);
+                thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+        }
+
+        let target = Duration::from_secs_f64(frame_idx as f64 / target_fps);
+        let now = epoch.elapsed();
+        let behind = now > target + Duration::from_secs_f64(2.0 / target_fps);
+        if target > now {
+            thread::sleep(target - now);
+        } else if behind {
+            frame_idx = (now.as_secs_f64() * target_fps).floor() as u64;
+        }
+
+        let t0 = Instant::now();
+        let payload = if let Some(cached) = cached.as_ref() {
+            cached.clone()
+        } else {
+            let uyvy = provider(frame_idx);
+            if uyvy.len() != stride * cfg.height as usize {
+                thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            if vmx.encode_uyvy(&uyvy, stride).is_err() {
+                continue;
+            }
+            match vmx.save_to(&mut vmx_buf) {
+                Ok(n) => vmx_buf[..n].to_vec(),
+                Err(_) => continue,
+            }
+        };
+        encode_us_acc += t0.elapsed().as_micros() as u64;
+
+        let timestamp = (frame_idx as i64).saturating_mul(video_interval);
+        let frame = MediaFrame {
+            frame_type: FrameType::VIDEO,
+            timestamp,
+            codec: Codec::Vmx1 as i32,
+            width: cfg.width,
+            height: cfg.height,
+            frame_rate_n: cfg.fps_n,
+            frame_rate_d: cfg.fps_d,
+            aspect_ratio: cfg.width as f32 / cfg.height.max(1) as f32,
+            color_space: ColorSpace::Undefined,
+            data: payload,
+            ..Default::default()
+        };
+        if sender.lock().send_video(frame).is_ok() {
+            video_sent += 1;
+        }
+        frame_idx += 1;
+
+        if last_stats.elapsed() >= Duration::from_secs(1) {
+            let st = sender.lock().statistics();
+            let avg_ms = if video_sent > 0 {
+                (encode_us_acc as f64 / video_sent as f64) / 1000.0
+            } else {
+                0.0
+            };
+            let mut snap = stats.lock();
+            snap.video_fps = video_sent as f32;
+            snap.encode_ms = avg_ms as f32;
+            snap.frames = st.frames;
+            snap.dropped = st.frames_dropped;
+            snap.behind = behind || snap.video_fps + 0.5 < target_fps as f32;
+            snap.port = sender.lock().port();
+            encode_us_acc = 0;
+            video_sent = 0;
+            last_stats = Instant::now();
+        }
+    }
+}
+
+fn append_sine_planar(
+    dst: &mut Vec<u8>,
+    channels: i32,
+    samples: i32,
+    sample_rate: i32,
+    tone_hz: f32,
+    phase: &mut f64,
+) {
+    let ch = channels.max(1) as usize;
+    let n = samples.max(0) as usize;
+    let rate = sample_rate.max(1) as f64;
+    let freq = tone_hz as f64;
+    dst.reserve(ch * n * 4);
+    let start = *phase;
+    for _c in 0..ch {
+        let mut p = start;
+        for _s in 0..n {
+            let sample = (TAU as f64 * freq * p / rate).sin() as f32 * 0.2;
+            dst.extend_from_slice(&sample.to_le_bytes());
+            p += 1.0;
+            if p >= rate {
+                p -= rate;
+            }
+        }
+    }
+    *phase = start + n as f64;
+    if *phase >= rate {
+        *phase %= rate;
+    }
+}
