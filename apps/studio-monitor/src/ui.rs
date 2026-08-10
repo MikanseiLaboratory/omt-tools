@@ -18,9 +18,11 @@ use omt_media::{
     list_output_devices, AudioLevels, AudioOutputDevice, BufferSettings, BufferUnit, DelaySetting,
     ConnectOptions, DiscoveredSource, Quality, ReceiveWorker, StallState, spawn_discover,
 };
-use openmediatransport::{bgra_alpha_mask, bgra_to_rgba};
+use openmediatransport::bgra_alpha_mask;
 use smallvec::smallvec;
-use suite_core::{t, Language, ThemePreference, SUITE_VERSION, load_config, save_config};
+use suite_core::{
+    t, Language, SimdCapabilities, ThemePreference, SUITE_VERSION, load_config, save_config,
+};
 
 use crate::chrome::UiChrome;
 use crate::menu::{self, ContextMenuState, MenuAction, MenuNodeId};
@@ -101,8 +103,12 @@ fn ui_font() -> Font {
     }
 }
 
-fn rgba_to_render_image(rgba: Vec<u8>, width: u32, height: u32) -> Option<Arc<RenderImage>> {
-    let buffer = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, rgba)?;
+/// Build a GPUI image from packed BGRA8.
+///
+/// `RenderImage` is documented as BGRA (decoded RGBA sources are R↔B swapped before
+/// upload). Feed OMT BGRA directly — do not convert to RGBA first.
+fn bgra_to_render_image(bgra: Vec<u8>, width: u32, height: u32) -> Option<Arc<RenderImage>> {
+    let buffer = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, bgra)?;
     Some(Arc::new(RenderImage::new(smallvec![Frame::new(buffer)])))
 }
 
@@ -371,13 +377,16 @@ impl MonitorView {
     }
 
     fn present_bgra(&mut self, bgra: Vec<u8>, width: u32, height: u32, cx: &mut Context<Self>) {
-        let rgba = if self.settings.show_alpha {
-            bgra_alpha_mask(&bgra)
+        // Keep raw BGRA for overlay toggles; upload BGRA (or alpha mask) as-is for GPUI.
+        let pixels = if self.settings.show_alpha {
+            let mask = bgra_alpha_mask(&bgra);
+            self.last_bgra = Some(bgra);
+            mask
         } else {
-            bgra_to_rgba(&bgra)
+            self.last_bgra = Some(bgra.clone());
+            bgra
         };
-        self.last_bgra = Some(bgra);
-        match rgba_to_render_image(rgba, width, height) {
+        match bgra_to_render_image(pixels, width, height) {
             Some(image) => {
                 if let Some(old) = self.texture.take() {
                     cx.drop_image(old, None);
@@ -624,21 +633,56 @@ impl MonitorView {
     }
 
     fn on_tick(&mut self, cx: &mut Context<Self>) {
+        let mut dirty = false;
+
+        let discovering_before = self.discovering;
+        let discovered_len_before = self.discovered.len();
+        let status_before = self.status.clone();
         self.poll_discovery();
+        if self.discovering != discovering_before
+            || self.discovered.len() != discovered_len_before
+            || self.status != status_before
+        {
+            dirty = true;
+        }
         if !self.discovering && self.last_refresh.elapsed() > Duration::from_secs(3) {
             self.request_refresh(true, cx);
         }
 
+        let log_ms_before = self.log_last_unix_ms;
         self.ingest_logs();
+        if self.log_last_unix_ms != log_ms_before {
+            dirty = true;
+        }
 
         {
             let counters = *self.worker.latest().counters.lock();
+            let audio_levels = *self.worker.latest().audio_levels.lock();
+            let video_buffer_delay_ms = *self.worker.latest().video_buffer_delay_ms.lock();
+            let audio_buffer_delay_ms = *self.worker.latest().audio_buffer_delay_ms.lock();
+            let stats = *self.worker.latest().stats.lock();
+
+            if self.frames_decoded != counters.frames_decoded
+                || self.source_dropped != counters.frames_replaced
+                || self.audio_frames != counters.audio_frames
+                || self.net_dropped != stats.frames_dropped
+                || self.bytes_received != stats.bytes_received
+                || self.video_buffer_delay_ms != video_buffer_delay_ms
+                || self.audio_buffer_delay_ms != audio_buffer_delay_ms
+                || self.audio_levels.peak_l != audio_levels.peak_l
+                || self.audio_levels.peak_r != audio_levels.peak_r
+                || self.audio_levels.sample_rate != audio_levels.sample_rate
+                || self.audio_levels.channels != audio_levels.channels
+            {
+                dirty = true;
+            }
+
             self.frames_decoded = counters.frames_decoded;
             self.source_dropped = counters.frames_replaced;
             self.audio_frames = counters.audio_frames;
-            self.audio_levels = *self.worker.latest().audio_levels.lock();
-            self.video_buffer_delay_ms = *self.worker.latest().video_buffer_delay_ms.lock();
-            self.audio_buffer_delay_ms = *self.worker.latest().audio_buffer_delay_ms.lock();
+            self.audio_levels = audio_levels;
+            self.video_buffer_delay_ms = video_buffer_delay_ms;
+            self.audio_buffer_delay_ms = audio_buffer_delay_ms;
             // Keep linked pair labels in sync when source FPS drifts.
             if self.settings.buffer.linked {
                 let (fps_n, fps_d) = self.buffer_fps();
@@ -646,15 +690,19 @@ impl MonitorView {
                 self.settings.buffer.resync_linked(fps_n, fps_d);
                 if self.settings.buffer != before {
                     self.worker.set_buffer(self.settings.buffer);
+                    dirty = true;
                 }
             }
-            let stats = *self.worker.latest().stats.lock();
             self.net_dropped = stats.frames_dropped;
             self.bytes_received = stats.bytes_received;
             let elapsed = self.last_bitrate_at.elapsed().as_secs_f64().max(0.001);
             if elapsed >= 0.5 {
                 let delta = (stats.bytes_received - self.last_bytes_received).max(0) as f64;
-                self.bitrate_bps = delta * 8.0 / elapsed;
+                let bitrate = delta * 8.0 / elapsed;
+                if (self.bitrate_bps - bitrate).abs() > 0.5 {
+                    dirty = true;
+                }
+                self.bitrate_bps = bitrate;
                 self.last_bytes_received = stats.bytes_received;
                 self.last_bitrate_at = Instant::now();
             }
@@ -668,20 +716,29 @@ impl MonitorView {
             self.window_fps_count += 1;
             self.last_frame_at = Some(Instant::now());
             self.present_bgra(frame.bgra, frame.width, frame.height, cx);
+            dirty = true;
         }
 
         if let Some(err) = self.worker.latest().error.lock().clone() {
-            self.status = SharedString::from(err);
+            let err = SharedString::from(err);
+            if self.status != err {
+                self.status = err;
+                dirty = true;
+            }
         }
 
         {
             let guard = self.worker.stall();
             let mut d = guard.lock();
-            self.stall_text = SharedString::from(match d.tick() {
+            let stall = SharedString::from(match d.tick() {
                 StallState::Waiting => t(self.language, "monitor.waiting"),
                 StallState::Live => "LIVE",
                 StallState::Stalled => t(self.language, "monitor.stalled"),
             });
+            if self.stall_text != stall {
+                self.stall_text = stall;
+                dirty = true;
+            }
         }
 
         if self.window_fps_start.elapsed() >= Duration::from_secs(1) {
@@ -689,8 +746,12 @@ impl MonitorView {
                 self.window_fps_count as f32 / self.window_fps_start.elapsed().as_secs_f32();
             self.window_fps_count = 0;
             self.window_fps_start = Instant::now();
+            dirty = true;
         }
-        cx.notify();
+
+        if dirty {
+            cx.notify();
+        }
     }
 
     pub(crate) fn select(&mut self, url: SharedString, cx: &mut Context<Self>) {
@@ -1444,8 +1505,9 @@ fn vu_overlay(display_w: f32, display_h: f32, levels: AudioLevels) -> impl IntoE
     let height = display_h * 0.6;
     let top = (display_h - height) * 0.5;
     let left = display_w - bar_w * 2.0 - gap - 12.0;
-    let l = levels.peak_l.clamp(0.0, 1.0);
-    let r = levels.peak_r.clamp(0.0, 1.0);
+    // Digital meters are logarithmic: -20 dBFS ≈ 2/3 scale, not 10% linear.
+    let l = peak_to_meter(levels.peak_l);
+    let r = peak_to_meter(levels.peak_r);
     div()
         .absolute()
         .left(px(left))
@@ -1458,11 +1520,23 @@ fn vu_overlay(display_w: f32, display_h: f32, levels: AudioLevels) -> impl IntoE
         .child(vu_bar(bar_w, height, r))
 }
 
+/// Map linear peak (1.0 = 0 dBFS) onto a −60…0 dBFS meter scale.
+fn peak_to_meter(peak: f32) -> f32 {
+    const FLOOR_DB: f32 = -60.0;
+    if peak <= 1e-6 {
+        return 0.0;
+    }
+    let db = (20.0 * peak.log10()).clamp(FLOOR_DB, 0.0);
+    ((db - FLOOR_DB) / -FLOOR_DB).clamp(0.0, 1.0)
+}
+
 fn vu_bar(width: f32, full_h: f32, level: f32) -> impl IntoElement {
     let h = (full_h * level).max(2.0);
-    let color = if level > 0.89 {
+    // Color by approximate dBFS on the −60…0 scale.
+    let db = -60.0 + level * 60.0;
+    let color = if db > -3.0 {
         rgb(0xf44336)
-    } else if level > 0.7 {
+    } else if db > -9.0 {
         rgb(0xffeb3b)
     } else {
         rgb(0x4caf50)
@@ -1615,6 +1689,11 @@ fn stats_panel(
             selected
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "-".into()),
+        ))
+        .child(div().h(px(8.0)))
+        .child(stat_row(
+            t(language, "simd"),
+            SimdCapabilities::detect().summary(),
         ))
 }
 

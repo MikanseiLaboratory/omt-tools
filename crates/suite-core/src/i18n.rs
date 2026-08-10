@@ -71,6 +71,8 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::Japanese, "theme") => "テーマ",
         (Language::English, "version") => "Version",
         (Language::Japanese, "version") => "バージョン",
+        (Language::English, "simd") => "SIMD",
+        (Language::Japanese, "simd") => "SIMD",
         (Language::English, "license") => "License",
         (Language::Japanese, "license") => "ライセンス",
         (Language::English, "launch") => "Launch",
@@ -241,22 +243,62 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::Japanese, "patterns.anim_speed_h") => "横スピード",
         (Language::English, "patterns.anim_speed_v") => "V speed",
         (Language::Japanese, "patterns.anim_speed_v") => "縦スピード",
-        (Language::English, "patterns.tone") => "1 kHz Tone (−20 dBFS)",
-        (Language::Japanese, "patterns.tone") => "トーン（−20 dBFS）",
+        (Language::English, "patterns.tone") => "Tone",
+        (Language::Japanese, "patterns.tone") => "トーン",
         (Language::English, "patterns.tone_mute") => "Mute (−∞)",
         (Language::Japanese, "patterns.tone_mute") => "ミュート (−∞)",
+        (Language::English, "patterns.tone_hz") => "Frequency",
+        (Language::Japanese, "patterns.tone_hz") => "周波数",
+        (Language::English, "patterns.tone_level") => "Level (dBFS)",
+        (Language::Japanese, "patterns.tone_level") => "レベル (dBFS)",
+        (Language::English, "patterns.sample_rate") => "Sample rate",
+        (Language::Japanese, "patterns.sample_rate") => "サンプルレート",
+        (Language::English, "patterns.channels") => "Channels",
+        (Language::Japanese, "patterns.channels") => "チャンネル",
+        (Language::English, "patterns.samples") => "Samples / packet",
+        (Language::Japanese, "patterns.samples") => "サンプル／パケット",
         (Language::English, "patterns.resolution") => "Resolution",
         (Language::Japanese, "patterns.resolution") => "解像度",
         (Language::English, "patterns.fps") => "Framerate",
         (Language::Japanese, "patterns.fps") => "フレームレート",
         (Language::English, "patterns.profile") => "Quality",
         (Language::Japanese, "patterns.profile") => "品質",
+        (Language::English, "patterns.settings") => "Settings",
+        (Language::Japanese, "patterns.settings") => "設定",
         (Language::English, "patterns.image") => "Custom images",
         (Language::Japanese, "patterns.image") => "カスタム画像",
         (Language::English, "patterns.image_add") => "Add image",
         (Language::Japanese, "patterns.image_add") => "画像を追加",
         (Language::English, "patterns.image_remove") => "Remove",
         (Language::Japanese, "patterns.image_remove") => "削除",
+        (Language::English, "patterns.image_reveal") => {
+            #[cfg(target_os = "windows")]
+            {
+                "Reveal in Explorer"
+            }
+            #[cfg(target_os = "macos")]
+            {
+                "Reveal in Finder"
+            }
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+            {
+                "Show in Folder"
+            }
+        }
+        (Language::Japanese, "patterns.image_reveal") => {
+            #[cfg(target_os = "windows")]
+            {
+                "エクスプローラーで表示"
+            }
+            #[cfg(target_os = "macos")]
+            {
+                "Finder で表示"
+            }
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+            {
+                "フォルダーで表示"
+            }
+        }
         (Language::English, "patterns.sending") => "Sending",
         (Language::Japanese, "patterns.sending") => "送出中",
         (Language::English, "patterns.idle") => "Idle",
@@ -304,6 +346,7 @@ mod tests {
             "language",
             "theme",
             "version",
+            "simd",
             "tool.studio_monitor",
             "tool.test_patterns",
             "monitor.stalled",

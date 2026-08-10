@@ -1,10 +1,12 @@
-//! Shared settings, localization, and suite version metadata for OMT Tools.
+//! Shared settings, localization, SIMD diagnostics, and suite version metadata for OMT Tools.
 
 #![deny(missing_docs)]
 
 mod config;
 mod fonts;
 mod i18n;
+mod reveal;
+mod simd;
 mod theme;
 mod version;
 
@@ -18,6 +20,8 @@ pub use config::{
 pub use fonts::install_egui_cjk_fonts;
 pub use fonts::load_cjk_font_bytes;
 pub use i18n::{Language, t};
+pub use reveal::{RevealError, reveal_in_file_manager};
+pub use simd::SimdCapabilities;
 pub use theme::ThemePreference;
 pub use version::{SUITE_VERSION, SuiteManifest, ToolId, ToolInfo, suite_manifest};
 

@@ -4,7 +4,8 @@ mod tools;
 
 use serde::{Deserialize, Serialize};
 use suite_core::{
-    Language, SuiteManifest, ThemePreference, ToolId, load_config, save_config, suite_manifest, t,
+    Language, SimdCapabilities, SuiteManifest, ThemePreference, ToolId, load_config, save_config,
+    suite_manifest, t,
 };
 
 #[derive(Debug, Serialize)]
@@ -25,6 +26,8 @@ struct LauncherState {
     language: String,
     theme: String,
     suite_version: String,
+    /// Compact SIMD capability summary for the settings panel.
+    simd: String,
     labels: Labels,
     tools: Vec<ToolCard>,
     manifest: SuiteManifest,
@@ -48,6 +51,7 @@ struct Labels {
     theme_dark: String,
     theme_system: String,
     unavailable: String,
+    simd: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,6 +78,7 @@ fn labels(lang: Language) -> Labels {
         theme_dark: t(lang, "theme.dark").to_string(),
         theme_system: t(lang, "theme.system").to_string(),
         unavailable: t(lang, "tool.unavailable").to_string(),
+        simd: t(lang, "simd").to_string(),
     }
 }
 
@@ -101,6 +106,7 @@ fn build_state(app: &tauri::AppHandle) -> Result<LauncherState, String> {
         language: cfg.language.as_str().to_string(),
         theme: cfg.theme.as_str().to_string(),
         suite_version: manifest.suite_version.clone(),
+        simd: SimdCapabilities::detect().summary(),
         labels: labels(cfg.language),
         tools,
         manifest,

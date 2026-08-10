@@ -27,12 +27,14 @@ type Labels = {
   themeDark: string;
   themeSystem: string;
   unavailable: string;
+  simd: string;
 };
 
 type LauncherState = {
   language: string;
   theme: string;
   suiteVersion: string;
+  simd: string;
   labels: Labels;
   tools: ToolCard[];
   manifest: {
@@ -93,6 +95,7 @@ function renderLabels(labels: Labels) {
   $("theme-label").textContent = labels.theme;
   $("version-label").textContent = labels.version;
   $("footer-version-label").textContent = labels.version;
+  $("simd-label").textContent = labels.simd;
   $("save-settings").textContent = labels.save;
 
   const themeSelect = $("theme-select") as HTMLSelectElement;
@@ -191,6 +194,7 @@ function renderManifest(current: LauncherState) {
     (t) => `${String(t.id)}  ${t.version}  (${t.enabled ? "enabled" : "preview"})`,
   );
   $("manifest-tools").textContent = lines.join("\n");
+  $("simd-info").textContent = current.simd;
 }
 
 function showToast(message: string) {
