@@ -21,11 +21,6 @@ jobs:
         with:
           toolchain: "1.97"
           components: rustfmt
-      - name: Checkout sibling crates
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
-          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
       - run: cargo fmt --all -- --check
 
   clippy-test:
@@ -53,11 +48,6 @@ jobs:
             libxcb-render0-dev \
             libxcb-shape0-dev \
             libxcb-xfixes0-dev
-      - name: Checkout sibling crates
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
-          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
       - name: Clippy (workspace libs/tools)
         run: cargo clippy -p suite-core -p omt-media -p pattern-generator -p monitor-bench -p capture-spike -p omt-studio-monitor -p omt-test-patterns --all-targets -- -D warnings
       - name: Test
@@ -81,11 +71,6 @@ jobs:
         with:
           toolchain: "1.97"
           targets: ${{ matrix.target }}
-      - name: Checkout sibling crates
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
-          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
       - name: Build release tools
         run: cargo build --release --target ${{ matrix.target }} -p omt-studio-monitor -p omt-test-patterns -p capture-spike
       - name: Upload tool artifacts
@@ -106,11 +91,6 @@ jobs:
         with:
           toolchain: "1.97"
           targets: aarch64-pc-windows-msvc
-      - name: Checkout sibling crates
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
-          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
       - name: Build Windows Arm64 tools
         run: cargo build --release --target aarch64-pc-windows-msvc -p omt-studio-monitor -p omt-test-patterns -p capture-spike
       - name: Upload tool artifacts
@@ -149,11 +129,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.2.19"
-      - name: Checkout sibling crates
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git ../openmediatransport-rs
-          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git ../vmx-rs
       - name: Ensure sidecar placeholders
         shell: pwsh
         run: ./scripts/ensure-sidecar-placeholders.ps1

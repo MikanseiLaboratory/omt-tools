@@ -18,9 +18,6 @@ Runtime media stack: [`MikanseiLaboratory/openmediatransport-rs`](https://github
 
 - Rust **1.97+** (edition 2024)
 - Bun 1.2+ (launcher frontend)
-- Sibling checkouts:
-  - `../openmediatransport-rs`
-  - `../vmx-rs`
 
 ## Develop
 

@@ -6186,6 +6186,7 @@ dependencies = [
 [[package]]
 name = "openmediatransport"
 version = "0.1.0"
+source = "git+https://github.com/MikanseiLaboratory/openmediatransport-rs#a8bc036d878c8aad422f3efe7934f5b7b688a62e"
 dependencies = [
  "bytes",
  "mdns-sd",
@@ -9926,6 +9927,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vmx"
 version = "0.1.0"
+source = "git+https://github.com/MikanseiLaboratory/vmx-rs#6cf175070b372b77cd52236aca3b5da18439af85"
 dependencies = [
  "rayon",
  "thiserror 2.0.20",
