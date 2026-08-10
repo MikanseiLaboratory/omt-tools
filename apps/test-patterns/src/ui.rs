@@ -2084,12 +2084,7 @@ fn stat_row(label: &str, value: String) -> impl IntoElement {
         .justify_between()
         .gap_3()
         .text_xs()
-        .child(
-            div()
-                .opacity(0.65)
-                .flex_shrink_0()
-                .child(label.to_string()),
-        )
+        .child(div().opacity(0.65).flex_shrink_0().child(label.to_string()))
         .child(
             div()
                 .font_weight(FontWeight::MEDIUM)
