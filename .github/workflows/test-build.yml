@@ -76,6 +76,8 @@ jobs:
         with:
           projectPath: './apps/launcher'
           # Skip updater signing artifacts; release/pre-release workflows sign with secrets.
-          args: ${{ matrix.args }} --config "{\"bundle\":{\"createUpdaterArtifacts\":false}}"
-          # Don't create releases for test builds
-          includeRelease: false
+          # Omit tagName so no GitHub Release is created. Use single-quoted JSON so
+          # the --config value is not mangled by shell/YAML escaping.
+          args: >-
+            ${{ matrix.args }}
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'

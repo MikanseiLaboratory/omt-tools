@@ -137,5 +137,5 @@ jobs:
             📋 **Full changelog and stable releases**: [View all releases](https://github.com/${{ github.repository }}/releases)
           releaseDraft: false
           prerelease: true
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
           args: ${{ matrix.args }}

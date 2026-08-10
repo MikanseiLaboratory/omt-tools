@@ -103,5 +103,5 @@ jobs:
 
             See the assets below to download and install this version.
           releaseDraft: false
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
           args: ${{ matrix.args }}
