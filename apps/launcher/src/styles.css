@@ -104,10 +104,58 @@ select {
 .brand {
   margin: 0;
   justify-self: center;
-  font-size: 42px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  display: grid;
+  place-items: center;
+  line-height: 0;
+}
+
+.brand-logo {
+  display: block;
+  width: min(220px, 46vw);
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+/* Official Alpha mark on light chrome; Dark mark on dark chrome. */
+.brand-logo-light {
+  display: none;
+}
+
+.brand-logo-dark {
+  display: block;
+}
+
+:root[data-theme="light"] .brand-logo-light {
+  display: block;
+}
+
+:root[data-theme="light"] .brand-logo-dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .brand-logo-light {
+    display: block;
+  }
+
+  :root:not([data-theme="dark"]) .brand-logo-dark {
+    display: none;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .top-link,
@@ -429,7 +477,10 @@ select {
   background: #2a2a2a;
 }
 
-:root[data-theme="light"] .primary-btn,
+:root[data-theme="light"] .primary-btn {
+  background: #efefef;
+}
+
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) .primary-btn {
     background: #efefef;
@@ -468,8 +519,8 @@ select {
 }
 
 @media (max-width: 720px) {
-  .brand {
-    font-size: 28px;
+  .brand-logo {
+    width: min(168px, 52vw);
   }
 
   .page {

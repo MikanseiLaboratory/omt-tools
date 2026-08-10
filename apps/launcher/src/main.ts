@@ -87,7 +87,7 @@ function applyTheme(theme: string) {
 }
 
 function renderLabels(labels: Labels) {
-  $("title").textContent = labels.title.toUpperCase();
+  $("title-text").textContent = labels.title;
   $("docs-label").textContent = labels.docs;
   $("settings-btn").setAttribute("aria-label", labels.settings);
   $("settings-title").textContent = labels.settings;
