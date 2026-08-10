@@ -28,9 +28,9 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY5RDYyMkI3QjBFMzUzNkEKUldScVUrT3d0eUxXK2RVYUlnc0NNQSszQzNxWUo0ci9HR2VRcEdkZUhTbnk4SmxkaU41bDA1bnEK",
       "endpoints": [
-        "https://releases.example.invalid/omt-tools/{{target}}/{{arch}}/{{current_version}}"
+        "https://github.com/MikanseiLaboratory/omt-tools/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"
@@ -40,7 +40,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "externalBin": [
       "binaries/omt-studio-monitor",
       "binaries/omt-test-patterns"

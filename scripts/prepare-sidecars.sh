@@ -7,7 +7,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET="${1:-$(rustc -vV | awk '/^host:/{print $2}')}"
 OUT="$ROOT/apps/launcher/src-tauri/binaries"
-PROFILE_DIR="$ROOT/target/release"
+if [[ -d "$ROOT/target/$TARGET/release" ]]; then
+  PROFILE_DIR="$ROOT/target/$TARGET/release"
+else
+  PROFILE_DIR="$ROOT/target/release"
+fi
 mkdir -p "$OUT"
 
 copy_one() {
