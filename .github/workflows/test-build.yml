@@ -38,12 +38,6 @@ jobs:
         with:
           bun-version: '1.2.19'
 
-      - name: Checkout sibling crates
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
-          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
-
       - name: Build sidecar tools
         run: cargo build --release --target ${{ matrix.rust_target }} -p omt-studio-monitor -p omt-test-patterns
 
