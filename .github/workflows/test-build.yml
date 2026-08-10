@@ -68,7 +68,7 @@ jobs:
           echo "BUILD_TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_ENV
 
       - name: Test Build Tauri App
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GIT_COMMIT_HASH: ${{ env.GIT_COMMIT_HASH }}
           GIT_BRANCH: ${{ env.GIT_BRANCH }}
