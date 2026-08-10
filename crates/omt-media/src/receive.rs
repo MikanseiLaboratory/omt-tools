@@ -23,11 +23,12 @@ const METADATA_LOG_CAP: usize = 256;
 pub struct ConnectOptions {
     /// Source URL (`omt://…`).
     pub url: String,
+    /// Discovery-time IP candidates tried before / with URL host resolution.
+    pub addresses: Vec<String>,
     /// Suggested encode quality sent to the peer via subscribe metadata.
-    ///
-    /// Preview / compressed-only receive flags are not supported by
-    /// [`ReceiverSession`]; quality is the only request that reaches the sender.
     pub quality: Quality,
+    /// Request 1/8 progressive Preview (`VideoFlags::PREVIEW` / low bandwidth).
+    pub preview: bool,
 }
 
 impl ConnectOptions {
@@ -35,7 +36,9 @@ impl ConnectOptions {
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),
+            addresses: Vec::new(),
             quality: Quality::Default,
+            preview: false,
         }
     }
 }
@@ -331,37 +334,85 @@ async fn worker_loop(
     publish_buffer_delays(&latest, &playout);
 
     loop {
+        // Drain + coalesce so a rapid A→B source switch never fully opens A.
+        let mut pending_connect: Option<ConnectOptions> = None;
+        let mut pending_disconnect = false;
+        let mut pending_buffer: Option<BufferSettings> = None;
+        let mut shutdown = false;
+
         while let Ok(cmd) = rx.try_recv() {
             match cmd {
                 ReceiveCommand::Connect(opts) => {
-                    apply_connect(opts, &mut receiver, &latest, &stall, &audio, &mut playout)
-                        .await;
+                    pending_disconnect = false;
+                    pending_connect = Some(opts);
                 }
                 ReceiveCommand::Disconnect => {
-                    apply_disconnect(&mut receiver, &latest, &stall, &audio, &mut playout);
+                    pending_connect = None;
+                    pending_disconnect = true;
                 }
                 ReceiveCommand::SetBuffer(settings) => {
-                    playout.set_settings(settings);
-                    publish_buffer_delays(&latest, &playout);
+                    pending_buffer = Some(settings);
                 }
-                ReceiveCommand::Shutdown => return,
+                ReceiveCommand::Shutdown => {
+                    shutdown = true;
+                    break;
+                }
             }
+        }
+
+        if shutdown {
+            return;
+        }
+        if let Some(settings) = pending_buffer {
+            playout.set_settings(settings);
+            publish_buffer_delays(&latest, &playout);
+        }
+        if pending_disconnect {
+            apply_disconnect(&mut receiver, &latest, &stall, &audio, &mut playout);
+        }
+        if let Some(opts) = pending_connect {
+            apply_connect(opts, &mut receiver, &latest, &stall, &audio, &mut playout).await;
         }
 
         let Some(recv) = receiver.as_ref() else {
             match rx.recv().await {
-                Some(ReceiveCommand::Connect(opts)) => {
-                    apply_connect(opts, &mut receiver, &latest, &stall, &audio, &mut playout)
-                        .await;
+                Some(first) => {
+                    let mut pending_connect: Option<ConnectOptions> = None;
+                    let mut pending_disconnect = false;
+                    let mut pending_buffer: Option<BufferSettings> = None;
+                    let mut cmds = vec![first];
+                    while let Ok(cmd) = rx.try_recv() {
+                        cmds.push(cmd);
+                    }
+                    for cmd in cmds {
+                        match cmd {
+                            ReceiveCommand::Connect(opts) => {
+                                pending_disconnect = false;
+                                pending_connect = Some(opts);
+                            }
+                            ReceiveCommand::Disconnect => {
+                                pending_connect = None;
+                                pending_disconnect = true;
+                            }
+                            ReceiveCommand::SetBuffer(settings) => {
+                                pending_buffer = Some(settings);
+                            }
+                            ReceiveCommand::Shutdown => return,
+                        }
+                    }
+                    if let Some(settings) = pending_buffer {
+                        playout.set_settings(settings);
+                        publish_buffer_delays(&latest, &playout);
+                    }
+                    if pending_disconnect {
+                        apply_disconnect(&mut receiver, &latest, &stall, &audio, &mut playout);
+                    }
+                    if let Some(opts) = pending_connect {
+                        apply_connect(opts, &mut receiver, &latest, &stall, &audio, &mut playout)
+                            .await;
+                    }
                 }
-                Some(ReceiveCommand::Disconnect) => {
-                    apply_disconnect(&mut receiver, &latest, &stall, &audio, &mut playout);
-                }
-                Some(ReceiveCommand::SetBuffer(settings)) => {
-                    playout.set_settings(settings);
-                    publish_buffer_delays(&latest, &playout);
-                }
-                Some(ReceiveCommand::Shutdown) | None => return,
+                None => return,
             }
             continue;
         };
@@ -480,27 +531,30 @@ async fn apply_connect(
     playout: &mut Playout,
 ) {
     *latest.error.lock() = None;
-    *latest.url.lock() = Some(opts.url.clone());
+    // Close the prep identity gate and drop leftover pixels from the previous
+    // source before opening the new session. Setting `url` only after connect
+    // succeeds prevents republishing the old source under the new selection.
+    *latest.url.lock() = None;
+    latest.clear_video();
+    *latest.stats.lock() = SessionStatistics::default();
     *latest.counters.lock() = ReceiveCounters::default();
     *latest.audio_levels.lock() = AudioLevels::default();
     latest.metadata_log.lock().clear();
     audio.clear();
     playout.reset();
     publish_buffer_delays(latest, playout);
+    stall.lock().reset();
     if let Some(old) = receiver.take() {
         old.disconnect();
     }
     *latest.session_state.lock() = SessionState::Connecting;
+    let url = opts.url.clone();
     match open_receiver(opts).await {
         Ok(r) => {
             *latest.session_state.lock() = r.state();
+            *latest.url.lock() = Some(url.clone());
             *receiver = Some(r);
-            stall.lock().reset();
-            push_log(
-                latest,
-                "info",
-                format!("connected {}", latest.url.lock().as_ref().unwrap()),
-            );
+            push_log(latest, "info", format!("connected {url}"));
         }
         Err(e) => {
             *receiver = None;
@@ -534,15 +588,18 @@ fn apply_disconnect(
 
 async fn open_receiver(opts: ConnectOptions) -> Result<ReceiverSession, OmtError> {
     let url = opts.url.clone();
+    let addresses = opts.addresses.clone();
     let quality = opts.quality;
+    let preview = opts.preview;
     tokio::task::spawn_blocking(move || {
         let config = ReceiverConfig {
             frame_types: FrameType::VIDEO | FrameType::AUDIO | FrameType::METADATA,
             quality,
+            preview,
             connect_timeout: Duration::from_secs(5),
             auto_reconnect: true,
         };
-        ReceiverSession::connect(url, config)
+        ReceiverSession::connect_with_addresses(url, &addresses, config)
     })
     .await
     .map_err(|e| OmtError::Network(e.to_string()))?

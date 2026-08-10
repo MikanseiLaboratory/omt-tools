@@ -2,26 +2,27 @@
 
 use omt_media::{BufferSettings, Quality};
 
-/// Receive quality preset (suggested encode quality sent to the peer).
+/// Receive quality preset (suggested encode quality + optional Preview).
 ///
-/// Official OMT "low bandwidth" is 1/8 preview mode (`OMTReceiveFlags.Preview`).
-/// [`omt_media::ReceiverSession`] does not request or decode preview frames yet,
-/// so this enum only covers quality suggestions.
+/// `LowBandwidth` maps to [`Quality::Low`] plus 1/8 progressive Preview
+/// (`ReceiverConfig.preview`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoQualityPreset {
     Default,
     Low,
     Medium,
     High,
+    LowBandwidth,
 }
 
 impl VideoQualityPreset {
-    pub fn to_quality(self) -> Quality {
+    pub fn to_connect_parts(self) -> (Quality, bool) {
         match self {
-            Self::Default => Quality::Default,
-            Self::Low => Quality::Low,
-            Self::Medium => Quality::Medium,
-            Self::High => Quality::High,
+            Self::Default => (Quality::Default, false),
+            Self::Low => (Quality::Low, false),
+            Self::Medium => (Quality::Medium, false),
+            Self::High => (Quality::High, false),
+            Self::LowBandwidth => (Quality::Low, true),
         }
     }
 }

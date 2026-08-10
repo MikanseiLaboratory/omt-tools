@@ -205,6 +205,8 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::Japanese, "monitor.quality_medium") => "中",
         (Language::English, "monitor.quality_high") => "High",
         (Language::Japanese, "monitor.quality_high") => "高",
+        (Language::English, "monitor.quality_low_bw") => "Low Bandwidth",
+        (Language::Japanese, "monitor.quality_low_bw") => "低帯域",
         (Language::English, "monitor.safe_area") => "Safe areas",
         (Language::Japanese, "monitor.safe_area") => "セーフエリア",
         (Language::English, "monitor.vu_meter") => "VU meter",

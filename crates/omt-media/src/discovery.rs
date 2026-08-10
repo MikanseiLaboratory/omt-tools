@@ -15,10 +15,12 @@ pub struct DiscoveredSource {
     pub host: String,
     /// Source name within the host.
     pub source: String,
-    /// Connectable `omt://` URL.
+    /// Connectable `omt://` URL (machine-name based).
     pub url: String,
     /// Advertised TCP port.
     pub port: u16,
+    /// Discovery-time IP candidates for TCP connect (ordered by preference).
+    pub addresses: Vec<String>,
 }
 
 impl From<&openmediatransport::OmtAddress> for DiscoveredSource {
@@ -30,6 +32,7 @@ impl From<&openmediatransport::OmtAddress> for DiscoveredSource {
             source,
             url: addr.to_url(),
             port: addr.port,
+            addresses: addr.addresses.clone(),
         }
     }
 }

@@ -77,6 +77,8 @@ struct MonitorApp {
     prep_ctrl: Arc<PrepControl>,
     discovered: Vec<DiscoveredSource>,
     selected: Option<String>,
+    /// Discovery-time IPs for the current selection (used on connect / reapply).
+    selected_addresses: Vec<String>,
     status: String,
     frame_w: u32,
     frame_h: u32,
@@ -167,6 +169,7 @@ impl MonitorApp {
             prep_ctrl,
             discovered: Vec::new(),
             selected: initial_url,
+            selected_addresses: Vec::new(),
             status: String::new(),
             frame_w: 0,
             frame_h: 0,
@@ -245,6 +248,11 @@ impl MonitorApp {
         match rx.try_recv() {
             Ok(Ok(list)) => {
                 self.discovered = list;
+                if let Some(url) = self.selected.as_ref()
+                    && let Some(src) = self.discovered.iter().find(|s| &s.url == url)
+                {
+                    self.selected_addresses = src.addresses.clone();
+                }
                 if !self.refresh_silent {
                     self.status = if self.discovered.is_empty() {
                         t(self.language, "monitor.no_sources").to_string()
@@ -428,16 +436,25 @@ impl MonitorApp {
         }
     }
 
-    fn connect_url(&mut self, url: String) {
-        let quality = self.settings.quality.to_quality();
+    fn connect_url(&mut self, url: String, addresses: Vec<String>) {
+        let (quality, preview) = self.settings.quality.to_connect_parts();
         *self.prep_ctrl.selected_url.lock() = Some(url.clone());
+        // Drop any prepared image from the previous source immediately.
+        self.prep_ctrl.slot.store(None);
         self.prep_ctrl.notify();
-        self.worker.connect_with(ConnectOptions { url, quality });
+        self.worker.connect_with(ConnectOptions {
+            url,
+            addresses,
+            quality,
+            preview,
+        });
     }
 
     fn disconnect_source(&mut self) {
         self.selected = None;
+        self.selected_addresses.clear();
         *self.prep_ctrl.selected_url.lock() = None;
+        self.prep_ctrl.slot.store(None);
         self.prep_ctrl.notify();
         self.worker.disconnect();
         self.frame_w = 0;
@@ -446,9 +463,10 @@ impl MonitorApp {
         self.status = t(self.language, "monitor.none").to_string();
     }
 
-    fn select(&mut self, url: String) {
+    fn select(&mut self, url: String, addresses: Vec<String>) {
         self.selected = Some(url.clone());
-        self.connect_url(url);
+        self.selected_addresses = addresses.clone();
+        self.connect_url(url, addresses);
         self.frames_presented = 0;
         self.frames_render_skipped = 0;
         self.frame_w = 0;
@@ -475,7 +493,7 @@ impl MonitorApp {
 
     fn reapply_connection(&mut self) {
         if let Some(url) = self.selected.clone() {
-            self.connect_url(url);
+            self.connect_url(url, self.selected_addresses.clone());
         }
     }
 
@@ -1004,7 +1022,7 @@ impl MonitorApp {
                                         &format!(":{}", s.port),
                                         selected,
                                     ) {
-                                        self.select(s.url);
+                                        self.select(s.url.clone(), s.addresses.clone());
                                     }
                                 }
                             }

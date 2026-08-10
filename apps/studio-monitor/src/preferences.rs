@@ -172,6 +172,7 @@ pub fn show(
                             (VideoQualityPreset::Low, "monitor.quality_low"),
                             (VideoQualityPreset::Medium, "monitor.quality_medium"),
                             (VideoQualityPreset::High, "monitor.quality_high"),
+                            (VideoQualityPreset::LowBandwidth, "monitor.quality_low_bw"),
                         ] {
                             if chip_button(
                                 ui,

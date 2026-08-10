@@ -2,7 +2,7 @@
 
 use std::f32::consts::TAU;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -16,6 +16,8 @@ use vmx::{Codec as VmxCodec, Config as VmxConfig, Profile};
 use crate::runtime;
 
 const TICKS_PER_SECOND: i64 = 10_000_000;
+/// How often [`SendStats`] are refreshed (connections, FPS window, etc.).
+const STATS_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Audio tone configuration.
 #[derive(Debug, Clone)]
@@ -113,6 +115,9 @@ type FrameProvider = Arc<dyn Fn(u64) -> Vec<u8> + Send + Sync>;
 pub struct SendSession {
     running: Arc<AtomicBool>,
     stats: Arc<Mutex<SendStats>>,
+    audio: Arc<Mutex<AudioToneConfig>>,
+    animate: Arc<AtomicBool>,
+    content_epoch: Arc<AtomicU64>,
     audio_join: Option<thread::JoinHandle<()>>,
     video_join: Option<tokio::task::JoinHandle<()>>,
 }
@@ -156,11 +161,14 @@ impl SendSession {
             port,
             ..Default::default()
         }));
+        let audio = Arc::new(Mutex::new(config.audio.clone()));
+        let animate = Arc::new(AtomicBool::new(config.animate));
+        let content_epoch = Arc::new(AtomicU64::new(0));
         let epoch = Instant::now();
 
         let audio_running = Arc::clone(&running);
         let audio_sender = Arc::clone(&sender);
-        let audio_cfg = config.audio.clone();
+        let audio_cfg = Arc::clone(&audio);
         let audio_join = thread::Builder::new()
             .name("omt-send-audio".into())
             .spawn(move || audio_loop(audio_sender, audio_cfg, audio_running, epoch))?;
@@ -168,12 +176,16 @@ impl SendSession {
         let video_running = Arc::clone(&running);
         let video_sender = Arc::clone(&sender);
         let video_stats = Arc::clone(&stats);
+        let video_animate = Arc::clone(&animate);
+        let video_epoch = Arc::clone(&content_epoch);
         let video_cfg = config.clone();
         let video_join = runtime::spawn(async move {
             video_loop(
                 video_sender,
                 video_cfg,
                 provider,
+                video_animate,
+                video_epoch,
                 video_running,
                 video_stats,
                 epoch,
@@ -184,6 +196,9 @@ impl SendSession {
         Ok(Self {
             running,
             stats,
+            audio,
+            animate,
+            content_epoch,
             audio_join: Some(audio_join),
             video_join: Some(video_join),
         })
@@ -192,6 +207,27 @@ impl SendSession {
     /// Snapshot of send statistics.
     pub fn stats(&self) -> SendStats {
         self.stats.lock().clone()
+    }
+
+    /// Hot-update tone parameters without tearing down the sender.
+    ///
+    /// Prefer this for `tone_hz` / `level_dbfs`. Changing `sample_rate`,
+    /// `channels`, or `samples` mid-stream is allowed but may briefly
+    /// confuse receivers — prefer a full restart for those.
+    pub fn update_audio(&self, audio: AudioToneConfig) {
+        *self.audio.lock() = audio;
+    }
+
+    /// Enable / disable per-frame content changes without restarting OMT.
+    pub fn set_animate(&self, animate: bool) {
+        self.animate.store(animate, Ordering::Relaxed);
+        // Drop any still-frame encode cache so the next frame matches.
+        self.content_epoch.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Invalidate a cached still encode (pattern / image changed while not animating).
+    pub fn invalidate_content(&self) {
+        self.content_epoch.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Stop tasks / threads.
@@ -214,14 +250,12 @@ impl Drop for SendSession {
 
 fn audio_loop(
     sender: Arc<Mutex<Sender>>,
-    cfg: AudioToneConfig,
+    cfg: Arc<Mutex<AudioToneConfig>>,
     running: Arc<AtomicBool>,
     epoch: Instant,
 ) {
     let mut audio_buf = Vec::new();
     let mut phase = 0.0f64;
-    let samples = cfg.samples.max(1) as i64;
-    let rate = cfg.sample_rate.max(1) as i64;
     let mut samples_sent = 0i64;
 
     while running.load(Ordering::Relaxed) {
@@ -230,6 +264,9 @@ fn audio_loop(
             thread::sleep(Duration::from_millis(10));
             continue;
         }
+        let snap = cfg.lock().clone();
+        let samples = snap.samples.max(1) as i64;
+        let rate = snap.sample_rate.max(1) as i64;
         let due = Duration::from_secs_f64(samples_sent as f64 / rate as f64);
         let now = epoch.elapsed();
         if due > now {
@@ -241,19 +278,19 @@ fn audio_loop(
             samples_sent -= samples_sent % samples;
         }
         audio_buf.clear();
-        if cfg.tone_hz > 0.0 {
+        if snap.tone_hz > 0.0 {
             append_sine_planar(
                 &mut audio_buf,
-                cfg.channels,
+                snap.channels,
                 samples as i32,
-                cfg.sample_rate,
-                cfg.tone_hz,
-                cfg.level_dbfs,
+                snap.sample_rate,
+                snap.tone_hz,
+                snap.level_dbfs,
                 &mut phase,
             );
         } else {
             // Mute: planar silence.
-            let ch = cfg.channels.max(1) as usize;
+            let ch = snap.channels.max(1) as usize;
             let n = samples.max(0) as usize;
             audio_buf.resize(ch * n * 4, 0);
         }
@@ -263,8 +300,8 @@ fn audio_loop(
             frame_type: FrameType::AUDIO,
             timestamp,
             codec: Codec::Fpa1 as i32,
-            sample_rate: cfg.sample_rate,
-            channels: cfg.channels,
+            sample_rate: snap.sample_rate,
+            channels: snap.channels,
             samples_per_channel: samples as i32,
             active_channels: 0,
             data: std::mem::take(&mut audio_buf),
@@ -278,6 +315,8 @@ async fn video_loop(
     sender: Arc<Mutex<Sender>>,
     cfg: SendSessionConfig,
     provider: FrameProvider,
+    animate_flag: Arc<AtomicBool>,
+    content_epoch: Arc<AtomicU64>,
     running: Arc<AtomicBool>,
     stats: Arc<Mutex<SendStats>>,
     epoch: Instant,
@@ -292,8 +331,9 @@ async fn video_loop(
     };
 
     let stride = (cfg.width as usize) * 2;
+    let frame_bytes = stride * cfg.height as usize;
     let mut vmx_buf = vec![0u8; 8 << 20];
-    let mut cached: Option<Vec<u8>> = None;
+    let mut cached: Option<(u64, Vec<u8>)> = None;
     let mut frame_idx = 0u64;
     let mut last_stats = Instant::now();
     let mut encode_us_acc = 0u64;
@@ -301,16 +341,6 @@ async fn video_loop(
     let video_interval =
         (cfg.fps_d as i64).saturating_mul(TICKS_PER_SECOND) / cfg.fps_n.max(1) as i64;
     let target_fps = cfg.fps_n as f64 / cfg.fps_d.max(1) as f64;
-
-    if !cfg.animate {
-        let uyvy = provider(0);
-        if uyvy.len() == stride * cfg.height as usize
-            && vmx.encode_uyvy(&uyvy, stride).is_ok()
-            && let Ok(n) = vmx.save_to(&mut vmx_buf)
-        {
-            cached = Some(vmx_buf[..n].to_vec());
-        }
-    }
 
     while running.load(Ordering::Relaxed) {
         let video_ok = tokio::task::block_in_place(|| {
@@ -333,23 +363,47 @@ async fn video_loop(
             frame_idx = (now.as_secs_f64() * target_fps).floor() as u64;
         }
 
+        let animate = animate_flag.load(Ordering::Relaxed);
+        let epoch_n = content_epoch.load(Ordering::Relaxed);
         let t0 = Instant::now();
-        let payload = if let Some(cached) = cached.as_ref() {
-            cached.clone()
+        let payload = if !animate {
+            if let Some((cached_epoch, data)) = cached.as_ref()
+                && *cached_epoch == epoch_n
+            {
+                data.clone()
+            } else {
+                let encode_result = tokio::task::block_in_place(|| {
+                    encode_provider_frame(
+                        &provider,
+                        frame_idx,
+                        &mut vmx,
+                        &mut vmx_buf,
+                        frame_bytes,
+                        stride,
+                    )
+                });
+                match encode_result {
+                    Some(p) => {
+                        cached = Some((epoch_n, p.clone()));
+                        p
+                    }
+                    None => {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                        continue;
+                    }
+                }
+            }
         } else {
-            let idx = frame_idx;
+            cached = None;
             let encode_result = tokio::task::block_in_place(|| {
-                let uyvy = provider(idx);
-                if uyvy.len() != stride * cfg.height as usize {
-                    return None;
-                }
-                if vmx.encode_uyvy(&uyvy, stride).is_err() {
-                    return None;
-                }
-                match vmx.save_to(&mut vmx_buf) {
-                    Ok(n) => Some(vmx_buf[..n].to_vec()),
-                    Err(_) => None,
-                }
+                encode_provider_frame(
+                    &provider,
+                    frame_idx,
+                    &mut vmx,
+                    &mut vmx_buf,
+                    frame_bytes,
+                    stride,
+                )
             });
             match encode_result {
                 Some(p) => p,
@@ -380,7 +434,7 @@ async fn video_loop(
         }
         frame_idx += 1;
 
-        if last_stats.elapsed() >= Duration::from_secs(1) {
+        if last_stats.elapsed() >= STATS_INTERVAL {
             let (st, port, connections, video_subs, audio_subs) =
                 tokio::task::block_in_place(|| {
                     let s = sender.lock();
@@ -392,13 +446,14 @@ async fn video_loop(
                         s.audio_subscriber_count() as u32,
                     )
                 });
+            let window = last_stats.elapsed().as_secs_f64().max(0.001);
             let avg_ms = if video_sent > 0 {
                 (encode_us_acc as f64 / video_sent as f64) / 1000.0
             } else {
                 0.0
             };
             let mut snap = stats.lock();
-            snap.video_fps = video_sent as f32;
+            snap.video_fps = (video_sent as f64 / window) as f32;
             snap.encode_ms = avg_ms as f32;
             snap.frames = st.frames;
             snap.dropped = st.frames_dropped;
@@ -415,6 +470,27 @@ async fn video_loop(
         }
 
         tokio::task::yield_now().await;
+    }
+}
+
+fn encode_provider_frame(
+    provider: &FrameProvider,
+    frame_idx: u64,
+    vmx: &mut VmxCodec,
+    vmx_buf: &mut [u8],
+    frame_bytes: usize,
+    stride: usize,
+) -> Option<Vec<u8>> {
+    let uyvy = provider(frame_idx);
+    if uyvy.len() != frame_bytes {
+        return None;
+    }
+    if vmx.encode_uyvy(&uyvy, stride).is_err() {
+        return None;
+    }
+    match vmx.save_to(vmx_buf) {
+        Ok(n) => Some(vmx_buf[..n].to_vec()),
+        Err(_) => None,
     }
 }
 
