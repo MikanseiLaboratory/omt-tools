@@ -11,6 +11,7 @@ description = "Headless Studio Monitor present-path performance harness"
 anyhow.workspace = true
 clap.workspace = true
 omt-media.workspace = true
+openmediatransport.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tracing.workspace = true

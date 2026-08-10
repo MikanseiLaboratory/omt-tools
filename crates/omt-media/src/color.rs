@@ -1,47 +1,4 @@
-//! Color / pixel format helpers.
-
-/// Convert BGRA8 to RGBA8 for egui textures.
-pub fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
-    let mut rgba = Vec::with_capacity(bgra.len());
-    for px in bgra.chunks_exact(4) {
-        rgba.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
-    }
-    rgba
-}
-
-/// Replace RGB with grayscale alpha visualization (A→RGB, A=255).
-pub fn bgra_alpha_mask(bgra: &[u8]) -> Vec<u8> {
-    let mut rgba = Vec::with_capacity(bgra.len());
-    for px in bgra.chunks_exact(4) {
-        let a = px[3];
-        rgba.extend_from_slice(&[a, a, a, 255]);
-    }
-    rgba
-}
-
-/// Composite BGRA over a checkerboard background into RGBA.
-pub fn bgra_over_checkerboard(bgra: &[u8], width: u32, height: u32, cell: u32) -> Vec<u8> {
-    let cell = cell.max(1);
-    let mut rgba = Vec::with_capacity(bgra.len());
-    for y in 0..height {
-        for x in 0..width {
-            let i = ((y * width + x) * 4) as usize;
-            let (b, g, r, a) = (bgra[i], bgra[i + 1], bgra[i + 2], bgra[i + 3]);
-            let checker = ((x / cell) + (y / cell)) % 2 == 0;
-            let (br, bg, bb) = if checker {
-                (180u8, 180u8, 180u8)
-            } else {
-                (80u8, 80u8, 80u8)
-            };
-            let af = a as f32 / 255.0;
-            let out_r = (r as f32 * af + br as f32 * (1.0 - af)).round() as u8;
-            let out_g = (g as f32 * af + bg as f32 * (1.0 - af)).round() as u8;
-            let out_b = (b as f32 * af + bb as f32 * (1.0 - af)).round() as u8;
-            rgba.extend_from_slice(&[out_r, out_g, out_b, 255]);
-        }
-    }
-    rgba
-}
+//! Send-side pixel helpers (RGB → UYVY) for pattern / capture paths.
 
 /// Convert one RGB pixel to BT.709 studio-range YUV.
 pub fn rgb_to_uyvy_pixel(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
@@ -84,14 +41,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bgra_to_rgba_swaps_channels() {
-        let bgra = [10u8, 20, 30, 255];
-        assert_eq!(bgra_to_rgba(&bgra), vec![30, 20, 10, 255]);
-    }
-
-    #[test]
-    fn alpha_mask_uses_alpha() {
-        let bgra = [1u8, 2, 3, 128];
-        assert_eq!(bgra_alpha_mask(&bgra), vec![128, 128, 128, 255]);
+    fn uyvy_from_rgb_black() {
+        let rgb = [0u8, 0, 0, 0, 0, 0];
+        let uyvy = uyvy_from_rgb_frame(&rgb, 2, 1);
+        assert_eq!(uyvy.len(), 4);
+        assert_eq!(uyvy[1], 16);
+        assert_eq!(uyvy[3], 16);
     }
 }

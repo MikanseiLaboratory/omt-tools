@@ -8,7 +8,7 @@ Open Media Transport production utilities inspired by NDI Tools.
 |------|--------|-------------|
 | **Launcher** (Tauri) | MVP | Starts bundled tools, language/theme settings, suite version |
 | **Studio Monitor** (GPUI) | MVP | Discover and view OMT sources on the LAN |
-| **Test Patterns** (egui) | MVP | Send SMPTE-style patterns + tone over OMT |
+| **Test Patterns** (GPUI) | MVP | Send SMPTE-style patterns + tone over OMT |
 | **Screen Capture** | Spike | Windows Graphics Capture / ScreenCaptureKit probe |
 
 ## Workspace layout
@@ -17,7 +17,7 @@ Open Media Transport production utilities inspired by NDI Tools.
 omt-tools/
   apps/launcher/             Tauri launcher (frontend + src-tauri)
   apps/studio-monitor/       GPUI viewer
-  apps/test-patterns/        egui sender
+  apps/test-patterns/        GPUI sender
   crates/suite-core/         settings, i18n, versions
   crates/omt-media/          discovery / receive / send helpers
   crates/pattern-generator/
@@ -101,7 +101,18 @@ bun run tauri build
 
 ## Settings
 
-Only the launcher edits preferences:
+Shared suite preferences (language / theme) live in `suite.json`. Each tool keeps its own file under the same config directory:
+
+| File | Owner |
+|------|--------|
+| `suite.json` | Shared (language, theme) |
+| `launcher.json` | Launcher |
+| `test-patterns.json` | Test Patterns (e.g. custom images) |
+| `studio-monitor.json` | Studio Monitor |
+
+On Windows this is typically `%AppData%\lab\Mikansei\OMT Tools\`.
+
+Only the launcher edits shared suite preferences:
 
 - Language: Japanese / English
 - Theme: Light / Dark / System

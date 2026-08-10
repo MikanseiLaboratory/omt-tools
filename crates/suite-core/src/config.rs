@@ -1,9 +1,10 @@
-//! Persistent suite configuration.
+//! Persistent suite and per-app configuration.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::Language;
@@ -23,7 +24,7 @@ pub enum ConfigError {
     Json(#[from] serde_json::Error),
 }
 
-/// Minimal shared preferences edited only in the launcher.
+/// Shared suite preferences (language / theme).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SuiteConfig {
@@ -31,7 +32,7 @@ pub struct SuiteConfig {
     pub language: Language,
     /// Theme preference.
     pub theme: ThemePreference,
-    /// Schema version for future migrations.
+    /// Schema version.
     pub schema_version: u32,
 }
 
@@ -45,33 +46,122 @@ impl Default for SuiteConfig {
     }
 }
 
-/// Resolve the on-disk config path.
-pub fn config_path() -> Result<PathBuf, ConfigError> {
+/// Test Patterns tool preferences (`test-patterns.json`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TestPatternsConfig {
+    /// Schema version.
+    pub schema_version: u32,
+    /// User-registered still-image paths (loaded at startup).
+    pub custom_images: Vec<PathBuf>,
+}
+
+impl Default for TestPatternsConfig {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            custom_images: Vec::new(),
+        }
+    }
+}
+
+/// Studio Monitor tool preferences (`studio-monitor.json`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StudioMonitorConfig {
+    /// Schema version.
+    pub schema_version: u32,
+}
+
+impl Default for StudioMonitorConfig {
+    fn default() -> Self {
+        Self { schema_version: 1 }
+    }
+}
+
+/// Launcher preferences (`launcher.json`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LauncherConfig {
+    /// Schema version.
+    pub schema_version: u32,
+}
+
+impl Default for LauncherConfig {
+    fn default() -> Self {
+        Self { schema_version: 1 }
+    }
+}
+
+/// Resolve the suite config directory.
+pub fn config_dir() -> Result<PathBuf, ConfigError> {
     let dirs = ProjectDirs::from("lab", "Mikansei", "OMT Tools").ok_or(ConfigError::NoConfigDir)?;
-    Ok(dirs.config_dir().join("config.json"))
+    Ok(dirs.config_dir().to_path_buf())
 }
 
-/// Load config from disk, migrating unknown fields with defaults.
+/// Path to the shared suite config (`suite.json`).
+pub fn config_path() -> Result<PathBuf, ConfigError> {
+    Ok(config_dir()?.join("suite.json"))
+}
+
+/// Path to a per-app config file (`{app_id}.json`).
+pub fn app_config_path(app_id: &str) -> Result<PathBuf, ConfigError> {
+    Ok(config_dir()?.join(format!("{app_id}.json")))
+}
+
+/// Load shared suite config.
 pub fn load_config() -> Result<SuiteConfig, ConfigError> {
-    let path = config_path()?;
-    if !path.exists() {
-        return Ok(SuiteConfig::default());
-    }
-    let raw = fs::read_to_string(&path)?;
-    let mut cfg: SuiteConfig = serde_json::from_str(&raw)?;
-    if cfg.schema_version == 0 {
-        cfg.schema_version = 1;
-    }
-    Ok(cfg)
+    load_json_file(&config_path()?)
 }
 
-/// Persist config to disk, creating parent directories as needed.
+/// Persist shared suite config.
 pub fn save_config(cfg: &SuiteConfig) -> Result<(), ConfigError> {
-    let path = config_path()?;
+    save_json_file(&config_path()?, cfg)
+}
+
+/// Load Test Patterns preferences.
+pub fn load_test_patterns_config() -> Result<TestPatternsConfig, ConfigError> {
+    load_json_file(&app_config_path("test-patterns")?)
+}
+
+/// Persist Test Patterns preferences.
+pub fn save_test_patterns_config(cfg: &TestPatternsConfig) -> Result<(), ConfigError> {
+    save_json_file(&app_config_path("test-patterns")?, cfg)
+}
+
+/// Load Studio Monitor preferences.
+pub fn load_studio_monitor_config() -> Result<StudioMonitorConfig, ConfigError> {
+    load_json_file(&app_config_path("studio-monitor")?)
+}
+
+/// Persist Studio Monitor preferences.
+pub fn save_studio_monitor_config(cfg: &StudioMonitorConfig) -> Result<(), ConfigError> {
+    save_json_file(&app_config_path("studio-monitor")?, cfg)
+}
+
+/// Load Launcher preferences.
+pub fn load_launcher_config() -> Result<LauncherConfig, ConfigError> {
+    load_json_file(&app_config_path("launcher")?)
+}
+
+/// Persist Launcher preferences.
+pub fn save_launcher_config(cfg: &LauncherConfig) -> Result<(), ConfigError> {
+    save_json_file(&app_config_path("launcher")?, cfg)
+}
+
+fn load_json_file<T: DeserializeOwned + Default>(path: &Path) -> Result<T, ConfigError> {
+    if !path.exists() {
+        return Ok(T::default());
+    }
+    let raw = fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&raw)?)
+}
+
+fn save_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), ConfigError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let json = serde_json::to_string_pretty(cfg)?;
+    let json = serde_json::to_string_pretty(value)?;
     fs::write(path, json)?;
     Ok(())
 }
@@ -79,13 +169,9 @@ pub fn save_config(cfg: &SuiteConfig) -> Result<(), ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn roundtrip_defaults() {
-        let _g = LOCK.lock().unwrap();
+    fn roundtrip_suite_defaults() {
         let cfg = SuiteConfig::default();
         let json = serde_json::to_string(&cfg).unwrap();
         let parsed: SuiteConfig = serde_json::from_str(&json).unwrap();
@@ -94,11 +180,35 @@ mod tests {
     }
 
     #[test]
-    fn migrate_missing_schema() {
-        let json = r#"{"language":"ja","theme":"dark"}"#;
-        let cfg: SuiteConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(cfg.language, Language::Japanese);
-        assert_eq!(cfg.theme, ThemePreference::Dark);
-        assert_eq!(cfg.schema_version, 1);
+    fn roundtrip_custom_images() {
+        let cfg = TestPatternsConfig {
+            schema_version: 1,
+            custom_images: vec![PathBuf::from("C:/images/bars.png")],
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: TestPatternsConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.custom_images.len(), 1);
+        assert_eq!(
+            parsed.custom_images[0],
+            PathBuf::from("C:/images/bars.png")
+        );
+    }
+
+    #[test]
+    fn app_config_paths() {
+        let dir = config_dir().unwrap();
+        assert_eq!(config_path().unwrap(), dir.join("suite.json"));
+        assert_eq!(
+            app_config_path("test-patterns").unwrap(),
+            dir.join("test-patterns.json")
+        );
+        assert_eq!(
+            app_config_path("studio-monitor").unwrap(),
+            dir.join("studio-monitor.json")
+        );
+        assert_eq!(
+            app_config_path("launcher").unwrap(),
+            dir.join("launcher.json")
+        );
     }
 }

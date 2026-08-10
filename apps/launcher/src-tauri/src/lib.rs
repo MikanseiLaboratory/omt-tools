@@ -4,8 +4,7 @@ mod tools;
 
 use serde::{Deserialize, Serialize};
 use suite_core::{
-    Language, SuiteConfig, SuiteManifest, ThemePreference, ToolId, load_config, save_config,
-    suite_manifest, t,
+    Language, SuiteManifest, ThemePreference, ToolId, load_config, save_config, suite_manifest, t,
 };
 
 #[derive(Debug, Serialize)]
@@ -123,11 +122,9 @@ fn save_settings(app: tauri::AppHandle, args: SaveSettingsArgs) -> Result<Launch
         .theme
         .parse::<ThemePreference>()
         .map_err(|_| "invalid theme".to_string())?;
-    let cfg = SuiteConfig {
-        language,
-        theme,
-        schema_version: 1,
-    };
+    let mut cfg = load_config().unwrap_or_default();
+    cfg.language = language;
+    cfg.theme = theme;
     save_config(&cfg).map_err(|e| e.to_string())?;
     build_state(&app)
 }

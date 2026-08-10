@@ -5,6 +5,12 @@
 //! cargo run --release -p omt-studio-monitor -- --headless --url omt://... --seconds 10
 //! ```
 
+// Hide the console window for release GUI launches on Windows.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod chrome;
+mod menu;
+mod preferences;
 mod ui;
 
 use std::time::Duration;
@@ -68,5 +74,5 @@ fn main() -> anyhow::Result<()> {
     }
 
     let title = t(overrides.language, "tool.studio_monitor").to_string();
-    ui::run_gpui(title, overrides.language, args.url)
+    ui::run_gpui(title, overrides.language, overrides.theme, args.url)
 }

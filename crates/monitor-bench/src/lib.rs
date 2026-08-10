@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use clap::ValueEnum;
-use omt_media::{ReceiveWorker, StallState, bgra_to_rgba};
+use omt_media::{ReceiveWorker, StallState};
+use openmediatransport::bgra_to_rgba;
 use serde::Serialize;
 
 /// Present-path backend under test.

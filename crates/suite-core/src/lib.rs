@@ -8,7 +8,12 @@ mod i18n;
 mod theme;
 mod version;
 
-pub use config::{SuiteConfig, config_path, load_config, save_config};
+pub use config::{
+    LauncherConfig, StudioMonitorConfig, SuiteConfig, TestPatternsConfig, app_config_path,
+    config_dir, config_path, load_config, load_launcher_config, load_studio_monitor_config,
+    load_test_patterns_config, save_config, save_launcher_config, save_studio_monitor_config,
+    save_test_patterns_config,
+};
 #[cfg(feature = "egui-fonts")]
 pub use fonts::install_egui_cjk_fonts;
 pub use fonts::load_cjk_font_bytes;

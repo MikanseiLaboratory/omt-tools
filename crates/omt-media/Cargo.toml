@@ -9,9 +9,11 @@ description = "Shared OMT discovery, receive/send helpers, and frame utilities"
 
 [dependencies]
 anyhow.workspace = true
+cpal.workspace = true
 openmediatransport.workspace = true
 parking_lot.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 vmx.workspace = true
 

@@ -1,15 +1,20 @@
-//! OMT Test Patterns sender application.
+//! OMT Test Patterns sender (GPUI).
 
-mod app;
+// Hide the console window for release GUI launches on Windows.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod ui;
 
 use clap::Parser;
-use suite_core::{LaunchOverrides, ThemePreference, t};
+use suite_core::{LaunchOverrides, t};
 
 #[derive(Debug, Parser)]
 #[command(name = "omt-test-patterns", about = "OMT Test Patterns")]
 struct Args {
+    /// UI language (`en` / `ja`).
     #[arg(long)]
     language: Option<String>,
+    /// Theme (`light` / `dark` / `system`).
     #[arg(long)]
     theme: Option<String>,
 }
@@ -26,30 +31,6 @@ fn main() -> anyhow::Result<()> {
         None,
     );
 
-    let title = t(overrides.language, "tool.test_patterns");
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([720.0, 640.0])
-            .with_title(title),
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        title,
-        options,
-        Box::new(move |cc| {
-            suite_core::install_egui_cjk_fonts(&cc.egui_ctx);
-            apply_theme(&cc.egui_ctx, overrides.theme);
-            Ok(Box::new(app::PatternsApp::new(cc, overrides.language)))
-        }),
-    )
-    .map_err(|e| anyhow::anyhow!("eframe error: {e}"))
-}
-
-fn apply_theme(ctx: &egui::Context, theme: ThemePreference) {
-    match theme {
-        ThemePreference::Light => ctx.set_visuals(egui::Visuals::light()),
-        ThemePreference::Dark => ctx.set_visuals(egui::Visuals::dark()),
-        ThemePreference::System => {}
-    }
+    let title = t(overrides.language, "tool.test_patterns").to_string();
+    ui::run_gpui(title, overrides.language)
 }

@@ -18,6 +18,7 @@ gpui.workspace = true
 image.workspace = true
 monitor-bench.workspace = true
 omt-media.workspace = true
+openmediatransport.workspace = true
 smallvec = "1"
 suite-core.workspace = true
 tracing.workspace = true

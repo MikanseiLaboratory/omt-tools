@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "OMT Test Patterns — send SMPTE-style video and tone"
+description = "OMT Test Patterns — send SMPTE-style video and tone (GPUI)"
 
 [[bin]]
 name = "omt-test-patterns"
@@ -14,12 +14,14 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-eframe.workspace = true
-egui.workspace = true
+gpui.workspace = true
+image.workspace = true
 omt-media.workspace = true
+openmediatransport.workspace = true
 pattern-generator.workspace = true
 rfd = "0.15"
-suite-core = { workspace = true, features = ["egui-fonts"] }
+smallvec = "1"
+suite-core.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 vmx.workspace = true

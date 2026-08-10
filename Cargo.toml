@@ -47,6 +47,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 clap = { version = "4", features = ["derive"] }
+cpal = "0.15"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 
 [profile.release]

@@ -17,5 +17,5 @@ thiserror.workspace = true
 
 [features]
 default = []
-## Enable [`install_egui_cjk_fonts`] for egui tools (Studio Monitor / Test Patterns).
+## Optional egui CJK font helper (unused by current GPUI tools).
 egui-fonts = ["dep:egui"]

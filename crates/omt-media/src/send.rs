@@ -1,4 +1,4 @@
-//! OMT send session with paced video + tone audio.
+//! OMT send session with Tokio-paced video + OS-thread tone audio.
 
 use std::f32::consts::TAU;
 use std::sync::Arc;
@@ -13,6 +13,8 @@ use openmediatransport::{
 use parking_lot::Mutex;
 use vmx::{Codec as VmxCodec, Config as VmxConfig, Profile};
 
+use crate::runtime;
+
 const TICKS_PER_SECOND: i64 = 10_000_000;
 
 /// Audio tone configuration.
@@ -24,6 +26,8 @@ pub struct AudioToneConfig {
     pub channels: i32,
     /// Tone frequency (Hz).
     pub tone_hz: f32,
+    /// Peak level in dBFS (SMPTE alignment tone default: −20).
+    pub level_dbfs: f32,
     /// Samples per packet (default 480 = 10 ms @ 48 kHz).
     pub samples: i32,
 }
@@ -34,6 +38,7 @@ impl Default for AudioToneConfig {
             sample_rate: 48_000,
             channels: 2,
             tone_hz: 1000.0,
+            level_dbfs: -20.0,
             samples: 480,
         }
     }
@@ -90,15 +95,26 @@ pub struct SendStats {
     pub behind: bool,
     /// Listening TCP port.
     pub port: u16,
+    /// Accepted peer TCP connections (≈ 2 per receiver client).
+    pub connections: u32,
+    /// Approximate receiver clients (`connections / 2`, rounded up).
+    pub clients: u32,
+    /// Peers subscribed to video.
+    pub video_subscribers: u32,
+    /// Peers subscribed to audio.
+    pub audio_subscribers: u32,
+    /// Cumulative bytes sent.
+    pub bytes_sent: i64,
 }
 
 type FrameProvider = Arc<dyn Fn(u64) -> Vec<u8> + Send + Sync>;
 
-/// Background OMT sender owning video + audio threads.
+/// Background OMT sender owning a Tokio video task + OS audio thread.
 pub struct SendSession {
     running: Arc<AtomicBool>,
     stats: Arc<Mutex<SendStats>>,
-    joins: Vec<thread::JoinHandle<()>>,
+    audio_join: Option<thread::JoinHandle<()>>,
+    video_join: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl SendSession {
@@ -124,10 +140,15 @@ impl SendSession {
         let port = sender.lock().port();
         {
             let name = config.name.clone();
-            let mut discovery = Discovery::new()?;
-            discovery.register(&name, port)?;
-            // Keep advertisement alive for process lifetime by leaking the discovery handle.
-            std::mem::forget(discovery);
+            // DNS-SD register is blocking; keep advertisement alive via leak (same as before).
+            runtime::handle()
+                .block_on(runtime::spawn_blocking(move || {
+                    let mut discovery = Discovery::new()?;
+                    discovery.register(&name, port)?;
+                    std::mem::forget(discovery);
+                    Ok::<(), OmtError>(())
+                }))
+                .map_err(|e| OmtError::Discovery(e.to_string()))??;
         }
 
         let running = Arc::new(AtomicBool::new(true));
@@ -148,23 +169,23 @@ impl SendSession {
         let video_sender = Arc::clone(&sender);
         let video_stats = Arc::clone(&stats);
         let video_cfg = config.clone();
-        let video_join = thread::Builder::new()
-            .name("omt-send-video".into())
-            .spawn(move || {
-                video_loop(
-                    video_sender,
-                    video_cfg,
-                    provider,
-                    video_running,
-                    video_stats,
-                    epoch,
-                );
-            })?;
+        let video_join = runtime::spawn(async move {
+            video_loop(
+                video_sender,
+                video_cfg,
+                provider,
+                video_running,
+                video_stats,
+                epoch,
+            )
+            .await;
+        });
 
         Ok(Self {
             running,
             stats,
-            joins: vec![audio_join, video_join],
+            audio_join: Some(audio_join),
+            video_join: Some(video_join),
         })
     }
 
@@ -173,10 +194,13 @@ impl SendSession {
         self.stats.lock().clone()
     }
 
-    /// Stop threads.
+    /// Stop tasks / threads.
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
-        for join in self.joins.drain(..) {
+        if let Some(join) = self.video_join.take() {
+            join.abort();
+        }
+        if let Some(join) = self.audio_join.take() {
             let _ = join.join();
         }
     }
@@ -211,18 +235,28 @@ fn audio_loop(
         if due > now {
             thread::sleep(due - now);
         } else if now > due + Duration::from_millis(50) {
+            // Snap to the shared wall epoch (same basis as video_loop) so A/V PTS
+            // stay on one timeline after a catch-up.
             samples_sent = (now.as_secs_f64() * rate as f64).round() as i64;
             samples_sent -= samples_sent % samples;
         }
         audio_buf.clear();
-        append_sine_planar(
-            &mut audio_buf,
-            cfg.channels,
-            samples as i32,
-            cfg.sample_rate,
-            cfg.tone_hz,
-            &mut phase,
-        );
+        if cfg.tone_hz > 0.0 {
+            append_sine_planar(
+                &mut audio_buf,
+                cfg.channels,
+                samples as i32,
+                cfg.sample_rate,
+                cfg.tone_hz,
+                cfg.level_dbfs,
+                &mut phase,
+            );
+        } else {
+            // Mute: planar silence.
+            let ch = cfg.channels.max(1) as usize;
+            let n = samples.max(0) as usize;
+            audio_buf.resize(ch * n * 4, 0);
+        }
         let timestamp = samples_sent.saturating_mul(TICKS_PER_SECOND) / rate;
         samples_sent += samples;
         let frame = MediaFrame {
@@ -240,7 +274,7 @@ fn audio_loop(
     }
 }
 
-fn video_loop(
+async fn video_loop(
     sender: Arc<Mutex<Sender>>,
     cfg: SendSessionConfig,
     provider: FrameProvider,
@@ -279,22 +313,22 @@ fn video_loop(
     }
 
     while running.load(Ordering::Relaxed) {
-        {
+        let video_ok = tokio::task::block_in_place(|| {
             let mut s = sender.lock();
             let _ = s.poll_accept();
             let _ = s.poll_peer_metadata();
-            if !s.video_subscribed() {
-                drop(s);
-                thread::sleep(Duration::from_millis(5));
-                continue;
-            }
+            s.video_subscribed()
+        });
+        if !video_ok {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            continue;
         }
 
         let target = Duration::from_secs_f64(frame_idx as f64 / target_fps);
         let now = epoch.elapsed();
         let behind = now > target + Duration::from_secs_f64(2.0 / target_fps);
         if target > now {
-            thread::sleep(target - now);
+            tokio::time::sleep(target - now).await;
         } else if behind {
             frame_idx = (now.as_secs_f64() * target_fps).floor() as u64;
         }
@@ -303,17 +337,26 @@ fn video_loop(
         let payload = if let Some(cached) = cached.as_ref() {
             cached.clone()
         } else {
-            let uyvy = provider(frame_idx);
-            if uyvy.len() != stride * cfg.height as usize {
-                thread::sleep(Duration::from_millis(5));
-                continue;
-            }
-            if vmx.encode_uyvy(&uyvy, stride).is_err() {
-                continue;
-            }
-            match vmx.save_to(&mut vmx_buf) {
-                Ok(n) => vmx_buf[..n].to_vec(),
-                Err(_) => continue,
+            let idx = frame_idx;
+            let encode_result = tokio::task::block_in_place(|| {
+                let uyvy = provider(idx);
+                if uyvy.len() != stride * cfg.height as usize {
+                    return None;
+                }
+                if vmx.encode_uyvy(&uyvy, stride).is_err() {
+                    return None;
+                }
+                match vmx.save_to(&mut vmx_buf) {
+                    Ok(n) => Some(vmx_buf[..n].to_vec()),
+                    Err(_) => None,
+                }
+            });
+            match encode_result {
+                Some(p) => p,
+                None => {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    continue;
+                }
             }
         };
         encode_us_acc += t0.elapsed().as_micros() as u64;
@@ -332,13 +375,23 @@ fn video_loop(
             data: payload,
             ..Default::default()
         };
-        if sender.lock().send_video(frame).is_ok() {
+        if tokio::task::block_in_place(|| sender.lock().send_video(frame)).is_ok() {
             video_sent += 1;
         }
         frame_idx += 1;
 
         if last_stats.elapsed() >= Duration::from_secs(1) {
-            let st = sender.lock().statistics();
+            let (st, port, connections, video_subs, audio_subs) =
+                tokio::task::block_in_place(|| {
+                    let s = sender.lock();
+                    (
+                        s.statistics(),
+                        s.port(),
+                        s.connection_count() as u32,
+                        s.video_subscriber_count() as u32,
+                        s.audio_subscriber_count() as u32,
+                    )
+                });
             let avg_ms = if video_sent > 0 {
                 (encode_us_acc as f64 / video_sent as f64) / 1000.0
             } else {
@@ -350,11 +403,18 @@ fn video_loop(
             snap.frames = st.frames;
             snap.dropped = st.frames_dropped;
             snap.behind = behind || snap.video_fps + 0.5 < target_fps as f32;
-            snap.port = sender.lock().port();
+            snap.port = port;
+            snap.connections = connections;
+            snap.clients = connections.div_ceil(2);
+            snap.video_subscribers = video_subs;
+            snap.audio_subscribers = audio_subs;
+            snap.bytes_sent = st.bytes_sent;
             encode_us_acc = 0;
             video_sent = 0;
             last_stats = Instant::now();
         }
+
+        tokio::task::yield_now().await;
     }
 }
 
@@ -364,18 +424,21 @@ fn append_sine_planar(
     samples: i32,
     sample_rate: i32,
     tone_hz: f32,
+    level_dbfs: f32,
     phase: &mut f64,
 ) {
     let ch = channels.max(1) as usize;
     let n = samples.max(0) as usize;
     let rate = sample_rate.max(1) as f64;
     let freq = tone_hz as f64;
+    // Peak amplitude from dBFS (1.0 == 0 dBFS). Clamp to avoid NaN / runaway gain.
+    let amplitude = 10f32.powf(level_dbfs.clamp(-120.0, 0.0) / 20.0);
     dst.reserve(ch * n * 4);
     let start = *phase;
     for _c in 0..ch {
         let mut p = start;
         for _s in 0..n {
-            let sample = (TAU as f64 * freq * p / rate).sin() as f32 * 0.2;
+            let sample = (TAU as f64 * freq * p / rate).sin() as f32 * amplitude;
             dst.extend_from_slice(&sample.to_le_bytes());
             p += 1.0;
             if p >= rate {
