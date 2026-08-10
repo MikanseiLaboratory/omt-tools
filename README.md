@@ -4,6 +4,9 @@
 
 Open Media Transport production utilities inspired by NDI Tools.
 
+<img width="864" height="571" alt="image" src="https://github.com/user-attachments/assets/80605b83-effc-4733-b96a-80b34c46e3ce" />
+
+
 ## Suite contents
 
 | Tool | Description |
@@ -19,42 +22,7 @@ Runtime media stack: [`MikanseiLaboratory/openmediatransport-rs`](https://github
 - Rust **1.97+** (edition 2024)
 - Bun 1.2+ (launcher frontend)
 
-## Develop
-
-```bash
-# Shared crates + tools
-cargo test -p suite-core -p omt-media -p pattern-generator -p capture-spike
-cargo run -p omt-studio-monitor
-cargo run -p omt-test-patterns
-
-# Prefer release for realtime encode/view
-cargo run --release -p omt-test-patterns
-cargo run --release -p omt-studio-monitor
-
-# Headless present-path bench
-cargo run --release -p omt-studio-monitor -- --headless --url omt://127.0.0.1:6400/Test --seconds 10
-# or: ./scripts/monitor-bench.ps1 -Url omt://...
-
-# Screen capture spike
-cargo run -p capture-spike -- --smoke
-```
-
-### Launcher
-
-```bash
-# From repo root (recommended)
-bun install --cwd apps/launcher
-bun run tools:build   # once: so Studio Monitor / Test Patterns resolve
-bun run dev           # tauri dev + Vite HMR for the launcher UI
-
-# Or from apps/launcher
-cd apps/launcher
-bun install
-bun run tools:build
-bun run dev
-```
-
-## Targets
+## Build Targets
 
 - Windows x64 (`x86_64-pc-windows-msvc`)
 - Windows Arm64 (`aarch64-pc-windows-msvc`)
