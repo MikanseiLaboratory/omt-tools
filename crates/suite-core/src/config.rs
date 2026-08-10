@@ -188,10 +188,7 @@ mod tests {
         let json = serde_json::to_string(&cfg).unwrap();
         let parsed: TestPatternsConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.custom_images.len(), 1);
-        assert_eq!(
-            parsed.custom_images[0],
-            PathBuf::from("C:/images/bars.png")
-        );
+        assert_eq!(parsed.custom_images[0], PathBuf::from("C:/images/bars.png"));
     }
 
     #[test]

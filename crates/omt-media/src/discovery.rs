@@ -75,7 +75,11 @@ impl SourceBrowser {
         }
         let discovery = self.discovery.as_mut().expect("discovery initialized");
         discovery.refresh_for(wait)?;
-        self.sources = discovery.sources().iter().map(DiscoveredSource::from).collect();
+        self.sources = discovery
+            .sources()
+            .iter()
+            .map(DiscoveredSource::from)
+            .collect();
         Ok(&self.sources)
     }
 

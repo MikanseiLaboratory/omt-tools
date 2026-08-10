@@ -168,6 +168,9 @@ mod tests {
             rgb.extend_from_slice(&[px[2], px[1], px[0]]);
         }
         let uyvy = uyvy_from_rgb_frame(&rgb, info.width, info.height);
-        assert_eq!(uyvy.len(), (info.width as usize) * 2 * (info.height as usize));
+        assert_eq!(
+            uyvy.len(),
+            (info.width as usize) * 2 * (info.height as usize)
+        );
     }
 }

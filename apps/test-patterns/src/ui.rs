@@ -1,17 +1,17 @@
 //! GPUI Test Patterns UI — pattern grid, send settings, preview, host stats.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use gpui::{
-    div, img, prelude::*, px, rgb, size, App, Application, Bounds, Context, FocusHandle, Focusable,
-    Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, InteractiveElement, KeyDownEvent,
-    MouseButton, MouseDownEvent, ObjectFit, RenderImage, SharedString, Timer, Window, WindowBounds,
-    WindowOptions,
+    App, Application, Bounds, Context, FocusHandle, Focusable, Font, FontFallbacks, FontFeatures,
+    FontStyle, FontWeight, InteractiveElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    ObjectFit, RenderImage, SharedString, Timer, Window, WindowBounds, WindowOptions, div, img,
+    prelude::*, px, rgb, size,
 };
 use image::{Frame, ImageBuffer, Rgba};
 use omt_media::{AudioToneConfig, SendSession, SendSessionConfig, SendStats};
@@ -19,8 +19,8 @@ use openmediatransport::uyvy_to_rgba;
 use pattern_generator::{PatternKind, fill_uyvy, uyvy_from_image_path};
 use smallvec::smallvec;
 use suite_core::{
-    load_test_patterns_config, reveal_in_file_manager, save_test_patterns_config, Language,
-    SimdCapabilities, TestPatternsConfig, t,
+    Language, SimdCapabilities, TestPatternsConfig, load_test_patterns_config,
+    reveal_in_file_manager, save_test_patterns_config, t,
 };
 use vmx::Profile;
 
@@ -42,13 +42,22 @@ struct FrameRate {
 
 impl FrameRate {
     const PRESETS: &[FrameRate] = &[
-        FrameRate { n: 24_000, d: 1_001 },
+        FrameRate {
+            n: 24_000,
+            d: 1_001,
+        },
         FrameRate { n: 24, d: 1 },
         FrameRate { n: 25, d: 1 },
-        FrameRate { n: 30_000, d: 1_001 },
+        FrameRate {
+            n: 30_000,
+            d: 1_001,
+        },
         FrameRate { n: 30, d: 1 },
         FrameRate { n: 50, d: 1 },
-        FrameRate { n: 60_000, d: 1_001 },
+        FrameRate {
+            n: 60_000,
+            d: 1_001,
+        },
         FrameRate { n: 60, d: 1 },
     ];
 
@@ -334,7 +343,10 @@ impl PatternsView {
             kind: PatternKind::SmpteColorBars,
             width: 1920,
             height: 1080,
-            frame_rate: FrameRate { n: 30_000, d: 1_001 },
+            frame_rate: FrameRate {
+                n: 30_000,
+                d: 1_001,
+            },
             profile: Profile::OmtSq,
             animate: true,
             anim_speed_h_pct: 100,
@@ -393,9 +405,11 @@ impl PatternsView {
             );
             if self.last_preview_at.elapsed() >= frame_interval {
                 if self.animate {
-                    let step_h = self.anim_speed_h_pct.clamp(-200, 200) as f32 / 100.0
+                    let step_h = self.anim_speed_h_pct.clamp(-200, 200) as f32
+                        / 100.0
                         / ANIM_BASE_CYCLE_FRAMES;
-                    let step_v = self.anim_speed_v_pct.clamp(-200, 200) as f32 / 100.0
+                    let step_v = self.anim_speed_v_pct.clamp(-200, 200) as f32
+                        / 100.0
                         / ANIM_BASE_CYCLE_FRAMES;
                     self.preview_phase_x = (self.preview_phase_x + step_h).rem_euclid(1.0);
                     self.preview_phase_y = (self.preview_phase_y + step_v).rem_euclid(1.0);
@@ -432,9 +446,8 @@ impl PatternsView {
         } else {
             "SD"
         };
-        self.window_title = SharedString::from(format!(
-            "OMT Test Patterns - {pattern} ({res}{fps})"
-        ));
+        self.window_title =
+            SharedString::from(format!("OMT Test Patterns - {pattern} ({res}{fps})"));
     }
 
     fn select_pattern(&mut self, kind: PatternKind, cx: &mut Context<Self>) {
@@ -559,8 +572,8 @@ impl PatternsView {
         }
         self.persist_images();
 
-        let was_selected = self.kind == PatternKind::Image
-            && self.selected_custom.is_some_and(|i| i == index);
+        let was_selected =
+            self.kind == PatternKind::Image && self.selected_custom.is_some_and(|i| i == index);
         if let Some(sel) = self.selected_custom.as_mut() {
             if *sel > index {
                 *sel -= 1;
@@ -576,7 +589,11 @@ impl PatternsView {
     }
 
     fn persist_images(&self) {
-        let paths: Vec<_> = self.custom_images.iter().map(|img| img.path.clone()).collect();
+        let paths: Vec<_> = self
+            .custom_images
+            .iter()
+            .map(|img| img.path.clone())
+            .collect();
         persist_custom_images(&paths);
     }
 
@@ -949,14 +966,7 @@ impl PatternsView {
             (0.0, 0.0)
         };
         let mut uyvy = vec![0u8; (PREVIEW_W as usize) * 2 * (PREVIEW_H as usize)];
-        fill_uyvy(
-            self.kind,
-            &mut uyvy,
-            PREVIEW_W,
-            PREVIEW_H,
-            phase_x,
-            phase_y,
-        );
+        fill_uyvy(self.kind, &mut uyvy, PREVIEW_W, PREVIEW_H, phase_x, phase_y);
         let rgba = uyvy_to_rgba(&uyvy, PREVIEW_W as u32, PREVIEW_H as u32);
         if let Some(image) = rgba_to_render_image(rgba, PREVIEW_W as u32, PREVIEW_H as u32) {
             if let Some(old) = self.preview.take() {
@@ -1013,250 +1023,236 @@ impl Render for PatternsView {
         let channels = self.channels;
         let samples = self.samples;
 
-        let mut root = div()
-            .relative()
-            .flex()
-            .flex_col()
-            .size_full()
-            .font(ui_font())
-            .bg(rgb(0x1a1d23))
-            .text_color(rgb(0xedf2f7))
-            .track_focus(&self.focus_handle)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                this.on_name_key(event, cx);
-            }))
-            // Title strip
-            .child(
-                div()
-                    .px_4()
-                    .py_2()
-                    .border_b_1()
-                    .border_color(rgb(0x2a3340))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_sm()
-                            .child(title),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .opacity(0.7)
-                            .child(if sending {
-                                SharedString::from(t(language, "patterns.sending"))
-                            } else {
-                                SharedString::from(t(language, "patterns.idle"))
-                            }),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .flex()
-                    .flex_row()
-                    // Pattern grid
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .id("pattern-grid")
-                            .overflow_y_scroll()
-                            .p_4()
-                            .child(pattern_grid(
-                                cx,
-                                language,
-                                kind,
-                                selected_custom,
-                                thumbs,
-                                custom_images,
-                            )),
-                    )
-                    // Stats + settings side panel
-                    .child(
-                        div()
-                            .w(px(SIDE_PANEL_W))
-                            .h_full()
-                            .id("side-panel")
-                            .overflow_y_scroll()
-                            .p_3()
-                            .gap_2()
-                            .flex()
-                            .flex_col()
-                            .border_l_1()
-                            .border_color(rgb(0x2a3340))
-                            .bg(rgb(0x14181f))
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(t(language, "patterns.stats")),
-                            )
-                            .child(stat_row(
-                                t(language, "patterns.clients"),
-                                format!("{}", stats.clients),
-                            ))
-                            .child(stat_row(
-                                t(language, "patterns.connections"),
-                                format!("{}", stats.connections),
-                            ))
-                            .child(stat_row(
-                                t(language, "patterns.video_subs"),
-                                format!("{}", stats.video_subscribers),
-                            ))
-                            .child(stat_row(
-                                t(language, "patterns.audio_subs"),
-                                format!("{}", stats.audio_subscribers),
-                            ))
-                            .child(stat_row("Port", format!("{}", stats.port)))
-                            .child(stat_row("Video FPS", format!("{:.1}", stats.video_fps)))
-                            .child(stat_row("Encode", format!("{:.1} ms", stats.encode_ms)))
-                            .child(stat_row("Frames", format!("{}", stats.frames)))
-                            .child(stat_row("Dropped", format!("{}", stats.dropped)))
-                            .child(stat_row("Bytes TX", format_bytes(stats.bytes_sent)))
-                            .child(div().h(px(8.0)))
-                            .child(stat_row(
-                                t(language, "simd"),
-                                SimdCapabilities::detect().summary(),
-                            ))
-                            .children(if stats.behind {
-                                Some(
+        let mut root =
+            div()
+                .relative()
+                .flex()
+                .flex_col()
+                .size_full()
+                .font(ui_font())
+                .bg(rgb(0x1a1d23))
+                .text_color(rgb(0xedf2f7))
+                .track_focus(&self.focus_handle)
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    this.on_name_key(event, cx);
+                }))
+                // Title strip
+                .child(
+                    div()
+                        .px_4()
+                        .py_2()
+                        .border_b_1()
+                        .border_color(rgb(0x2a3340))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_sm()
+                                .child(title),
+                        )
+                        .child(div().text_xs().opacity(0.7).child(if sending {
+                            SharedString::from(t(language, "patterns.sending"))
+                        } else {
+                            SharedString::from(t(language, "patterns.idle"))
+                        })),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .flex_row()
+                        // Pattern grid
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .h_full()
+                                .id("pattern-grid")
+                                .overflow_y_scroll()
+                                .p_4()
+                                .child(pattern_grid(
+                                    cx,
+                                    language,
+                                    kind,
+                                    selected_custom,
+                                    thumbs,
+                                    custom_images,
+                                )),
+                        )
+                        // Stats + settings side panel
+                        .child(
+                            div()
+                                .w(px(SIDE_PANEL_W))
+                                .h_full()
+                                .id("side-panel")
+                                .overflow_y_scroll()
+                                .p_3()
+                                .gap_2()
+                                .flex()
+                                .flex_col()
+                                .border_l_1()
+                                .border_color(rgb(0x2a3340))
+                                .bg(rgb(0x14181f))
+                                .child(
                                     div()
-                                        .mt_2()
-                                        .text_xs()
-                                        .text_color(rgb(0xf6c344))
-                                        .child(t(language, "patterns.perf_warn")),
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(t(language, "patterns.stats")),
                                 )
-                            } else {
-                                None
-                            })
-                            .children(error.map(|e| {
-                                div()
-                                    .mt_2()
-                                    .text_xs()
-                                    .text_color(rgb(0xff6b6b))
-                                    .child(e)
-                            }))
-                            .child(
-                                div()
-                                    .mt_3()
-                                    .mb_1()
-                                    .h(px(1.0))
-                                    .bg(rgb(0x2a3340)),
-                            )
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(t(language, "patterns.settings")),
-                            )
-                            .child(name_field(cx, language, &name, name_editing))
-                            .child(resolution_control(
-                                cx,
-                                language,
-                                width,
-                                height,
-                                open_menu == Some(MenuKind::Resolution),
-                            ))
-                            .child(toggle_row(
-                                cx,
-                                "animate-toggle",
-                                t(language, "patterns.animate"),
-                                animate,
-                                |this, cx| this.toggle_animate(cx),
-                            ))
-                            .child(stepper_row(
-                                cx,
-                                "speed-h",
-                                t(language, "patterns.anim_speed_h"),
-                                format!("{speed_h}%"),
-                                |this, cx| this.nudge_anim_speed_h(-10, cx),
-                                |this, cx| this.nudge_anim_speed_h(10, cx),
-                            ))
-                            .child(stepper_row(
-                                cx,
-                                "speed-v",
-                                t(language, "patterns.anim_speed_v"),
-                                format!("{speed_v}%"),
-                                |this, cx| this.nudge_anim_speed_v(-10, cx),
-                                |this, cx| this.nudge_anim_speed_v(10, cx),
-                            ))
-                            .child(stepper_row(
-                                cx,
-                                "tone-hz",
-                                t(language, "patterns.tone_hz"),
-                                if tone_hz <= 0.0 {
-                                    "—".into()
+                                .child(stat_row(
+                                    t(language, "patterns.clients"),
+                                    format!("{}", stats.clients),
+                                ))
+                                .child(stat_row(
+                                    t(language, "patterns.connections"),
+                                    format!("{}", stats.connections),
+                                ))
+                                .child(stat_row(
+                                    t(language, "patterns.video_subs"),
+                                    format!("{}", stats.video_subscribers),
+                                ))
+                                .child(stat_row(
+                                    t(language, "patterns.audio_subs"),
+                                    format!("{}", stats.audio_subscribers),
+                                ))
+                                .child(stat_row("Port", format!("{}", stats.port)))
+                                .child(stat_row("Video FPS", format!("{:.1}", stats.video_fps)))
+                                .child(stat_row("Encode", format!("{:.1} ms", stats.encode_ms)))
+                                .child(stat_row("Frames", format!("{}", stats.frames)))
+                                .child(stat_row("Dropped", format!("{}", stats.dropped)))
+                                .child(stat_row("Bytes TX", format_bytes(stats.bytes_sent)))
+                                .child(div().h(px(8.0)))
+                                .child(stat_row(
+                                    t(language, "simd"),
+                                    SimdCapabilities::detect().summary(),
+                                ))
+                                .children(if stats.behind {
+                                    Some(
+                                        div()
+                                            .mt_2()
+                                            .text_xs()
+                                            .text_color(rgb(0xf6c344))
+                                            .child(t(language, "patterns.perf_warn")),
+                                    )
                                 } else {
-                                    format!("{tone_hz:.0} Hz")
-                                },
-                                |this, cx| this.nudge_tone_hz(-10.0, cx),
-                                |this, cx| this.nudge_tone_hz(10.0, cx),
-                            ))
-                            .child(stepper_row(
-                                cx,
-                                "tone-level",
-                                t(language, "patterns.tone_level"),
-                                format!("{level_dbfs:.1}"),
-                                |this, cx| this.nudge_level_dbfs(-1.0, cx),
-                                |this, cx| this.nudge_level_dbfs(1.0, cx),
-                            ))
-                            .child(stepper_row(
-                                cx,
-                                "sample-rate",
-                                t(language, "patterns.sample_rate"),
-                                format!("{sample_rate}"),
-                                |this, cx| this.nudge_sample_rate(-1, cx),
-                                |this, cx| this.nudge_sample_rate(1, cx),
-                            ))
-                            .child(stepper_row(
-                                cx,
-                                "channels",
-                                t(language, "patterns.channels"),
-                                format!("{channels}"),
-                                |this, cx| this.nudge_channels(-1, cx),
-                                |this, cx| this.nudge_channels(1, cx),
-                            ))
-                            .child(stepper_row(
-                                cx,
-                                "samples",
-                                t(language, "patterns.samples"),
-                                format!("{samples}"),
-                                |this, cx| this.nudge_samples(-16, cx),
-                                |this, cx| this.nudge_samples(16, cx),
-                            )),
-                    ),
-            )
-            // Bottom control bar
-            .child(
-                div()
-                    .px_4()
-                    .py_3()
-                    .gap_4()
-                    .flex()
-                    .items_end()
-                    .border_t_1()
-                    .border_color(rgb(0x2a3340))
-                    .bg(rgb(0x12161c))
-                    .child(tone_control(
-                        cx,
-                        language,
-                        tone_hz,
-                        open_menu == Some(MenuKind::Tone),
-                    ))
-                    .child(fps_control(
-                        cx,
-                        language,
-                        frame_rate,
-                        open_menu == Some(MenuKind::Fps),
-                    ))
-                    .child(quality_control(cx, language, profile))
-                    .child(transport_controls(cx, language, sending))
-                    .child(div().flex_1())
-                    .child(output_preview(language, preview)),
-            );
+                                    None
+                                })
+                                .children(error.map(|e| {
+                                    div().mt_2().text_xs().text_color(rgb(0xff6b6b)).child(e)
+                                }))
+                                .child(div().mt_3().mb_1().h(px(1.0)).bg(rgb(0x2a3340)))
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(t(language, "patterns.settings")),
+                                )
+                                .child(name_field(cx, language, &name, name_editing))
+                                .child(resolution_control(
+                                    cx,
+                                    language,
+                                    width,
+                                    height,
+                                    open_menu == Some(MenuKind::Resolution),
+                                ))
+                                .child(toggle_row(
+                                    cx,
+                                    "animate-toggle",
+                                    t(language, "patterns.animate"),
+                                    animate,
+                                    |this, cx| this.toggle_animate(cx),
+                                ))
+                                .child(stepper_row(
+                                    cx,
+                                    "speed-h",
+                                    t(language, "patterns.anim_speed_h"),
+                                    format!("{speed_h}%"),
+                                    |this, cx| this.nudge_anim_speed_h(-10, cx),
+                                    |this, cx| this.nudge_anim_speed_h(10, cx),
+                                ))
+                                .child(stepper_row(
+                                    cx,
+                                    "speed-v",
+                                    t(language, "patterns.anim_speed_v"),
+                                    format!("{speed_v}%"),
+                                    |this, cx| this.nudge_anim_speed_v(-10, cx),
+                                    |this, cx| this.nudge_anim_speed_v(10, cx),
+                                ))
+                                .child(stepper_row(
+                                    cx,
+                                    "tone-hz",
+                                    t(language, "patterns.tone_hz"),
+                                    if tone_hz <= 0.0 {
+                                        "—".into()
+                                    } else {
+                                        format!("{tone_hz:.0} Hz")
+                                    },
+                                    |this, cx| this.nudge_tone_hz(-10.0, cx),
+                                    |this, cx| this.nudge_tone_hz(10.0, cx),
+                                ))
+                                .child(stepper_row(
+                                    cx,
+                                    "tone-level",
+                                    t(language, "patterns.tone_level"),
+                                    format!("{level_dbfs:.1}"),
+                                    |this, cx| this.nudge_level_dbfs(-1.0, cx),
+                                    |this, cx| this.nudge_level_dbfs(1.0, cx),
+                                ))
+                                .child(stepper_row(
+                                    cx,
+                                    "sample-rate",
+                                    t(language, "patterns.sample_rate"),
+                                    format!("{sample_rate}"),
+                                    |this, cx| this.nudge_sample_rate(-1, cx),
+                                    |this, cx| this.nudge_sample_rate(1, cx),
+                                ))
+                                .child(stepper_row(
+                                    cx,
+                                    "channels",
+                                    t(language, "patterns.channels"),
+                                    format!("{channels}"),
+                                    |this, cx| this.nudge_channels(-1, cx),
+                                    |this, cx| this.nudge_channels(1, cx),
+                                ))
+                                .child(stepper_row(
+                                    cx,
+                                    "samples",
+                                    t(language, "patterns.samples"),
+                                    format!("{samples}"),
+                                    |this, cx| this.nudge_samples(-16, cx),
+                                    |this, cx| this.nudge_samples(16, cx),
+                                )),
+                        ),
+                )
+                // Bottom control bar
+                .child(
+                    div()
+                        .px_4()
+                        .py_3()
+                        .gap_4()
+                        .flex()
+                        .items_end()
+                        .border_t_1()
+                        .border_color(rgb(0x2a3340))
+                        .bg(rgb(0x12161c))
+                        .child(tone_control(
+                            cx,
+                            language,
+                            tone_hz,
+                            open_menu == Some(MenuKind::Tone),
+                        ))
+                        .child(fps_control(
+                            cx,
+                            language,
+                            frame_rate,
+                            open_menu == Some(MenuKind::Fps),
+                        ))
+                        .child(quality_control(cx, language, profile))
+                        .child(transport_controls(cx, language, sending))
+                        .child(div().flex_1())
+                        .child(output_preview(language, preview)),
+                );
 
         // Root-level overlays so dropdowns / context menus paint above the main grid.
         if open_menu.is_some() || custom_menu.is_some() {
@@ -1329,143 +1325,128 @@ fn overlay_layer(
             menu_div = menu_div.bottom(px(72.0)).left(left);
         } else {
             // Align with side panel settings area.
-            menu_div = menu_div
-                .top(px(220.0))
-                .right(px(16.0));
+            menu_div = menu_div.top(px(220.0)).right(px(16.0));
         }
-        layer = layer.child(menu_div.children(match menu {
-            MenuKind::Tone => TonePreset::PRESETS
-                .iter()
-                .map(|preset| {
-                    let preset = *preset;
-                    let active = preset.matches(tone_hz);
-                    div()
-                        .id(SharedString::from(format!("tone-{}", preset.hz())))
-                        .px_2()
-                        .py_1()
-                        .rounded_sm()
-                        .bg(if active {
-                            rgb(0x2f6fed)
-                        } else {
-                            rgb(0x1b222c)
-                        })
-                        .hover(|s| s.bg(rgb(0x243041)))
-                        .cursor_pointer()
-                        .text_xs()
-                        .child(preset.label(language))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.set_tone(preset, cx);
-                        }))
-                        .into_any_element()
-                })
-                .collect::<Vec<_>>(),
-            MenuKind::Fps => FrameRate::PRESETS
-                .iter()
-                .map(|preset| {
-                    let preset = *preset;
-                    let active = frame_rate == preset;
-                    div()
-                        .id(SharedString::from(format!(
-                            "fps-{}-{}",
-                            preset.n, preset.d
-                        )))
-                        .px_2()
-                        .py_1()
-                        .rounded_sm()
-                        .bg(if active {
-                            rgb(0x2f6fed)
-                        } else {
-                            rgb(0x1b222c)
-                        })
-                        .hover(|s| s.bg(rgb(0x243041)))
-                        .cursor_pointer()
-                        .text_xs()
-                        .child(preset.label())
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.set_frame_rate(preset, cx);
-                        }))
-                        .into_any_element()
-                })
-                .collect::<Vec<_>>(),
-            MenuKind::Resolution => {
-                let mut items: Vec<gpui::AnyElement> = Resolution::PRESETS
+        layer = layer.child(
+            menu_div.children(match menu {
+                MenuKind::Tone => TonePreset::PRESETS
                     .iter()
                     .map(|preset| {
                         let preset = *preset;
-                        let active = width == preset.width && height == preset.height;
+                        let active = preset.matches(tone_hz);
                         div()
-                            .id(SharedString::from(format!(
-                                "res-{}-{}",
-                                preset.width, preset.height
-                            )))
+                            .id(SharedString::from(format!("tone-{}", preset.hz())))
                             .px_2()
                             .py_1()
                             .rounded_sm()
-                            .bg(if active {
-                                rgb(0x2f6fed)
-                            } else {
-                                rgb(0x1b222c)
-                            })
+                            .bg(if active { rgb(0x2f6fed) } else { rgb(0x1b222c) })
+                            .hover(|s| s.bg(rgb(0x243041)))
+                            .cursor_pointer()
+                            .text_xs()
+                            .child(preset.label(language))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.set_tone(preset, cx);
+                            }))
+                            .into_any_element()
+                    })
+                    .collect::<Vec<_>>(),
+                MenuKind::Fps => FrameRate::PRESETS
+                    .iter()
+                    .map(|preset| {
+                        let preset = *preset;
+                        let active = frame_rate == preset;
+                        div()
+                            .id(SharedString::from(format!("fps-{}-{}", preset.n, preset.d)))
+                            .px_2()
+                            .py_1()
+                            .rounded_sm()
+                            .bg(if active { rgb(0x2f6fed) } else { rgb(0x1b222c) })
                             .hover(|s| s.bg(rgb(0x243041)))
                             .cursor_pointer()
                             .text_xs()
                             .child(preset.label())
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.set_resolution(preset, cx);
+                                this.set_frame_rate(preset, cx);
                             }))
                             .into_any_element()
                     })
-                    .collect();
-                items.push(
-                    div()
-                        .mt_1()
-                        .pt_1()
-                        .border_t_1()
-                        .border_color(rgb(0x2a3340))
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(
+                    .collect::<Vec<_>>(),
+                MenuKind::Resolution => {
+                    let mut items: Vec<gpui::AnyElement> = Resolution::PRESETS
+                        .iter()
+                        .map(|preset| {
+                            let preset = *preset;
+                            let active = width == preset.width && height == preset.height;
                             div()
-                                .px_1()
+                                .id(SharedString::from(format!(
+                                    "res-{}-{}",
+                                    preset.width, preset.height
+                                )))
+                                .px_2()
+                                .py_1()
+                                .rounded_sm()
+                                .bg(if active { rgb(0x2f6fed) } else { rgb(0x1b222c) })
+                                .hover(|s| s.bg(rgb(0x243041)))
+                                .cursor_pointer()
                                 .text_xs()
-                                .opacity(0.65)
-                                .child(format!("W {width}")),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .gap_1()
-                                .child(step_btn(cx, "res-w-dec", "−", |this, cx| {
-                                    this.nudge_width(-2, cx);
+                                .child(preset.label())
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.set_resolution(preset, cx);
                                 }))
-                                .child(step_btn(cx, "res-w-inc", "+", |this, cx| {
-                                    this.nudge_width(2, cx);
-                                })),
-                        )
-                        .child(
-                            div()
-                                .px_1()
-                                .text_xs()
-                                .opacity(0.65)
-                                .child(format!("H {height}")),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .gap_1()
-                                .child(step_btn(cx, "res-h-dec", "−", |this, cx| {
-                                    this.nudge_height(-2, cx);
-                                }))
-                                .child(step_btn(cx, "res-h-inc", "+", |this, cx| {
-                                    this.nudge_height(2, cx);
-                                })),
-                        )
-                        .into_any_element(),
-                );
-                items
-            }
-        }));
+                                .into_any_element()
+                        })
+                        .collect();
+                    items.push(
+                        div()
+                            .mt_1()
+                            .pt_1()
+                            .border_t_1()
+                            .border_color(rgb(0x2a3340))
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .px_1()
+                                    .text_xs()
+                                    .opacity(0.65)
+                                    .child(format!("W {width}")),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap_1()
+                                    .child(step_btn(cx, "res-w-dec", "−", |this, cx| {
+                                        this.nudge_width(-2, cx);
+                                    }))
+                                    .child(step_btn(cx, "res-w-inc", "+", |this, cx| {
+                                        this.nudge_width(2, cx);
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .px_1()
+                                    .text_xs()
+                                    .opacity(0.65)
+                                    .child(format!("H {height}")),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap_1()
+                                    .child(step_btn(cx, "res-h-dec", "−", |this, cx| {
+                                        this.nudge_height(-2, cx);
+                                    }))
+                                    .child(step_btn(cx, "res-h-inc", "+", |this, cx| {
+                                        this.nudge_height(2, cx);
+                                    })),
+                            )
+                            .into_any_element(),
+                    );
+                    items
+                }
+            }),
+        );
     }
 
     if let Some((index, x, y)) = custom_menu {
@@ -2074,10 +2055,7 @@ fn quality_control(
         )
 }
 
-fn output_preview(
-    language: Language,
-    preview: Option<Arc<RenderImage>>,
-) -> impl IntoElement {
+fn output_preview(language: Language, preview: Option<Arc<RenderImage>>) -> impl IntoElement {
     div()
         .flex()
         .flex_col()

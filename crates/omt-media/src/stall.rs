@@ -63,10 +63,11 @@ impl StallDetector {
             return self.state;
         };
         let elapsed = last.elapsed();
-        let frame_interval =
-            Duration::from_secs_f64(self.fps_d as f64 / self.fps_n.max(1) as f64);
+        let frame_interval = Duration::from_secs_f64(self.fps_d as f64 / self.fps_n.max(1) as f64);
         let dynamic = frame_interval.mul_f32(self.frame_timeout_multiplier);
-        let deadline = dynamic.max(Duration::from_millis(200)).min(self.absolute_timeout);
+        let deadline = dynamic
+            .max(Duration::from_millis(200))
+            .min(self.absolute_timeout);
         if elapsed > deadline || elapsed > self.absolute_timeout {
             self.state = StallState::Stalled;
         } else {

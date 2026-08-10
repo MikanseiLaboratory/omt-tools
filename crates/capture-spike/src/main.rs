@@ -2,8 +2,8 @@
 
 mod capture;
 
-use clap::Parser;
 use capture::CaptureProbe;
+use clap::Parser;
 
 #[derive(Debug, Parser)]
 #[command(

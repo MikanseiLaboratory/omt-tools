@@ -54,7 +54,10 @@ mod tests {
 
     #[test]
     fn parse_theme() {
-        assert_eq!("dark".parse::<ThemePreference>().unwrap(), ThemePreference::Dark);
+        assert_eq!(
+            "dark".parse::<ThemePreference>().unwrap(),
+            ThemePreference::Dark
+        );
         assert_eq!(
             "system".parse::<ThemePreference>().unwrap(),
             ThemePreference::System

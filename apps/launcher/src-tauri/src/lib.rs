@@ -4,8 +4,8 @@ mod tools;
 
 use serde::{Deserialize, Serialize};
 use suite_core::{
-    Language, SimdCapabilities, SuiteManifest, ThemePreference, ToolId, load_config, save_config,
-    suite_manifest, t,
+    load_config, save_config, suite_manifest, t, Language, SimdCapabilities, SuiteManifest,
+    ThemePreference, ToolId,
 };
 
 #[derive(Debug, Serialize)]
@@ -157,7 +157,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         // No native application menu — keep chrome minimal like NDI Tools.
-        .menu(|app| Ok(tauri::menu::Menu::new(app)?))
+        .menu(tauri::menu::Menu::new)
         .invoke_handler(tauri::generate_handler![
             get_launcher_state,
             save_settings,

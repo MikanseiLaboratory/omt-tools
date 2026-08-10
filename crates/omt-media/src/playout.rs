@@ -374,8 +374,7 @@ impl Playout {
         // Cap per tick (~every few ms) so we slew instead of jumping.
         let slew_ms = (err_ms * 0.12).clamp(-0.75, 0.75);
         let delta = (slew_ms * TICKS_PER_MS as f64).round() as i64;
-        self.clock_skew_ticks = (self.clock_skew_ticks + delta)
-            .clamp(-50_000_000, 50_000_000); // ±5 s
+        self.clock_skew_ticks = (self.clock_skew_ticks + delta).clamp(-50_000_000, 50_000_000); // ±5 s
     }
 
     fn maybe_resnap(&mut self, audio: &AudioOutput) {

@@ -34,11 +34,7 @@ impl UiChrome {
             ThemePreference::Light => false,
             ThemePreference::System => system_dark,
         };
-        if dark {
-            Self::dark()
-        } else {
-            Self::light()
-        }
+        if dark { Self::dark() } else { Self::light() }
     }
 
     fn dark() -> Self {

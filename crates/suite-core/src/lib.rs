@@ -55,7 +55,11 @@ impl LaunchOverrides {
     ) -> Self {
         let cfg = load_config().unwrap_or_default();
         let language = language
-            .or_else(|| std::env::var(env::LANGUAGE).ok().and_then(|s| s.parse().ok()))
+            .or_else(|| {
+                std::env::var(env::LANGUAGE)
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+            })
             .unwrap_or(cfg.language);
         let theme = theme
             .or_else(|| std::env::var(env::THEME).ok().and_then(|s| s.parse().ok()))

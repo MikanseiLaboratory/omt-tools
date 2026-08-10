@@ -5,8 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use openmediatransport::{
-    FrameType, OmtError, Quality, ReceiverConfig, ReceiverSession, SessionState,
-    SessionStatistics,
+    FrameType, OmtError, Quality, ReceiverConfig, ReceiverSession, SessionState, SessionStatistics,
 };
 use parking_lot::{Condvar, Mutex};
 use tokio::sync::mpsc;

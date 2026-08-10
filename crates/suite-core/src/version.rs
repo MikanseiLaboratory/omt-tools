@@ -47,11 +47,7 @@ impl ToolId {
 
     /// All known tools in launcher order.
     pub const fn all() -> &'static [ToolId] {
-        &[
-            Self::StudioMonitor,
-            Self::TestPatterns,
-            Self::ScreenCapture,
-        ]
+        &[Self::StudioMonitor, Self::TestPatterns, Self::ScreenCapture]
     }
 }
 
@@ -115,7 +111,15 @@ mod tests {
     fn manifest_contains_core_tools() {
         let m = suite_manifest();
         assert_eq!(m.suite_version, SUITE_VERSION);
-        assert!(m.tools.iter().any(|t| t.id == ToolId::StudioMonitor && t.enabled));
-        assert!(m.tools.iter().any(|t| t.id == ToolId::TestPatterns && t.enabled));
+        assert!(
+            m.tools
+                .iter()
+                .any(|t| t.id == ToolId::StudioMonitor && t.enabled)
+        );
+        assert!(
+            m.tools
+                .iter()
+                .any(|t| t.id == ToolId::TestPatterns && t.enabled)
+        );
     }
 }

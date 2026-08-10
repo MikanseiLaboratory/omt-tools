@@ -12,10 +12,10 @@ mod send;
 mod stall;
 mod stats;
 
-pub use audio_out::{list_output_devices, AudioLevels, AudioOutput, AudioOutputDevice};
+pub use audio_out::{AudioLevels, AudioOutput, AudioOutputDevice, list_output_devices};
 pub use color::{rgb_to_uyvy_pixel, uyvy_from_rgb_frame};
-pub use playout::{BufferSettings, BufferUnit, DelaySetting};
 pub use discovery::{DiscoveredSource, SourceBrowser, discover_sources, spawn_discover};
+pub use playout::{BufferSettings, BufferUnit, DelaySetting};
 pub use receive::{
     ConnectOptions, LatestVideo, MetadataLogEntry, ReceiveCounters, ReceiveWorker, VideoFrame,
 };
@@ -24,8 +24,8 @@ pub use stall::{StallDetector, StallState};
 pub use stats::FpsCounter;
 
 pub use openmediatransport::{
-    bgra_alpha_mask, bgra_to_rgba, bgra_to_rgba_into, Codec, ColorSpace, DecodedAudioFrame,
-    DecodedVideoFrame, Discovery, FrameType, MediaFrame, MetadataFrame, Quality, ReceiverConfig,
-    ReceiverSession, Sender, SenderConfig, SenderInfo, SessionState, SessionStatistics, Statistics,
+    Codec, ColorSpace, DecodedAudioFrame, DecodedVideoFrame, Discovery, FrameType, MediaFrame,
+    MetadataFrame, Quality, ReceiverConfig, ReceiverSession, Sender, SenderConfig, SenderInfo,
+    SessionState, SessionStatistics, Statistics, bgra_alpha_mask, bgra_to_rgba, bgra_to_rgba_into,
 };
 pub use vmx::{Codec as VmxCodec, Config as VmxConfig, Profile as VmxProfile};

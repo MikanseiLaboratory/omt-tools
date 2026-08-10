@@ -378,12 +378,7 @@ fn rgb_to_uyvy_pixel_tuple(rgb: (u8, u8, u8)) -> (u8, u8, u8) {
     rgb_to_uyvy_pixel(rgb.0, rgb.1, rgb.2)
 }
 
-fn write_uyvy_pair(
-    dst: &mut [u8],
-    o: usize,
-    left: (u8, u8, u8),
-    right: (u8, u8, u8),
-) {
+fn write_uyvy_pair(dst: &mut [u8], o: usize, left: (u8, u8, u8), right: (u8, u8, u8)) {
     let (y0, u0, v0) = left;
     let (y1, u1, v1) = right;
     let u = ((u0 as u16 + u1 as u16) / 2) as u8;

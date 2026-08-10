@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use suite_core::{LaunchOverrides, ToolId, load_config};
+use suite_core::{load_config, LaunchOverrides, ToolId};
 use tauri::{AppHandle, Manager};
 
 /// Resolve the on-disk path for a bundled tool binary.
@@ -111,7 +111,9 @@ fn process_running(name: &str) -> bool {
         .output()
         .map(|o| {
             let stdout = String::from_utf8_lossy(&o.stdout);
-            stdout.to_ascii_lowercase().contains(&exe.to_ascii_lowercase())
+            stdout
+                .to_ascii_lowercase()
+                .contains(&exe.to_ascii_lowercase())
         })
         .unwrap_or(false)
 }

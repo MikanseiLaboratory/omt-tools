@@ -311,6 +311,7 @@ fn audio_loop(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn video_loop(
     sender: Arc<Mutex<Sender>>,
     cfg: SendSessionConfig,

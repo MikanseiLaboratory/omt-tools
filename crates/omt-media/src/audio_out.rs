@@ -1,9 +1,9 @@
 //! System audio playback for received OMT PCM (cpal).
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::Arc;
 use std::thread;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -41,9 +41,7 @@ pub struct AudioOutputDevice {
 /// List available cpal output devices (best-effort).
 pub fn list_output_devices() -> Vec<AudioOutputDevice> {
     let host = cpal::default_host();
-    let default_name = host
-        .default_output_device()
-        .and_then(|d| d.name().ok());
+    let default_name = host.default_output_device().and_then(|d| d.name().ok());
     let Ok(devices) = host.output_devices() else {
         return Vec::new();
     };
@@ -355,8 +353,7 @@ fn consume_pts_frames(runs: &mut VecDeque<PtsRun>, mut frames: usize, shared: &S
         run.frames_consumed += take;
         let progressed = run.frames_consumed as i64;
         let total = run.frames_total.max(1) as i64;
-        let pts = run.pts_start
-            + (run.pts_duration.saturating_mul(progressed) / total);
+        let pts = run.pts_start + (run.pts_duration.saturating_mul(progressed) / total);
         shared.playhead_pts.store(pts, Ordering::Release);
         shared.playhead_valid.store(true, Ordering::Release);
         if run.frames_consumed >= run.frames_total {
@@ -385,10 +382,7 @@ fn resolve_device(name: &Option<String>) -> Result<cpal::Device, String> {
         .ok_or_else(|| "no default output device".to_string())
 }
 
-fn run_output_thread(
-    shared: Arc<Shared>,
-    cmd_rx: mpsc::Receiver<AudioCmd>,
-) -> Result<(), String> {
+fn run_output_thread(shared: Arc<Shared>, cmd_rx: mpsc::Receiver<AudioCmd>) -> Result<(), String> {
     let mut selected = shared.device_name.lock().clone();
     loop {
         let device = match resolve_device(&selected) {

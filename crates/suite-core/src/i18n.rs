@@ -91,9 +91,7 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         // Tools
         (Language::English, "tool.studio_monitor") => "Studio Monitor",
         (Language::Japanese, "tool.studio_monitor") => "Studio Monitor",
-        (Language::English, "tool.studio_monitor.desc") => {
-            "Browse and view OMT sources on the LAN"
-        }
+        (Language::English, "tool.studio_monitor.desc") => "Browse and view OMT sources on the LAN",
         (Language::Japanese, "tool.studio_monitor.desc") => {
             "LAN上のOMTソースを一覧表示・プレビュー"
         }

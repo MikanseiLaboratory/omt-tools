@@ -3,14 +3,14 @@
 //! Waits on [`LatestVideo`] frame notifications (Tokio media path publishes;
 //! this OS thread only converts). UI thread only uploads the finished image.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use arc_swap::ArcSwapOption;
 use egui::{ColorImage, Context};
-use omt_media::{bgra_alpha_mask, bgra_to_rgba_into, LatestVideo};
+use omt_media::{LatestVideo, bgra_alpha_mask, bgra_to_rgba_into};
 use parking_lot::{Condvar, Mutex};
 
 /// Prepared frame ready for egui texture upload (conversion already done).
@@ -117,7 +117,8 @@ impl Drop for FramePrep {
 }
 
 fn prep_loop(latest: Arc<LatestVideo>, ctrl: Arc<PrepControl>) {
-    let mut last_raw: Option<(Arc<[u8]>, u32, u32, i32, i32)> = None;
+    type LastRawFrame = (Arc<[u8]>, u32, u32, i32, i32);
+    let mut last_raw: Option<LastRawFrame> = None;
     let mut applied_epoch = 0u64;
     let mut rgba_buf = Vec::new();
 

@@ -2,7 +2,7 @@
 
 use egui::{Color32, Context, RichText, Sense, Ui, Vec2};
 use omt_media::{AudioOutputDevice, BufferSettings};
-use suite_core::{t, Language, ThemePreference, SUITE_VERSION};
+use suite_core::{Language, SUITE_VERSION, ThemePreference, t};
 
 use crate::chrome::UiChrome;
 use crate::settings::{MonitorSettings, VideoQualityPreset};
@@ -68,6 +68,7 @@ pub enum PrefsAction {
 }
 
 /// Draw the preferences modal. Returns an action if the user interacted.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ctx: &Context,
     language: Language,
@@ -174,12 +175,8 @@ pub fn show(
                             (VideoQualityPreset::High, "monitor.quality_high"),
                             (VideoQualityPreset::LowBandwidth, "monitor.quality_low_bw"),
                         ] {
-                            if chip_button(
-                                ui,
-                                chrome,
-                                t(language, key),
-                                settings.quality == preset,
-                            ) {
+                            if chip_button(ui, chrome, t(language, key), settings.quality == preset)
+                            {
                                 action = Some(PrefsAction::SetQuality(preset));
                             }
                         }
@@ -195,8 +192,12 @@ pub fn show(
                     ) {
                         action = Some(PrefsAction::SetSafeArea(!settings.safe_area));
                     }
-                    if toggle_row(ui, chrome, t(language, "monitor.vu_meter"), settings.vu_meter)
-                    {
+                    if toggle_row(
+                        ui,
+                        chrome,
+                        t(language, "monitor.vu_meter"),
+                        settings.vu_meter,
+                    ) {
                         action = Some(PrefsAction::SetVu(!settings.vu_meter));
                     }
 
@@ -228,33 +229,35 @@ pub fn show(
                         .inner_margin(6.0)
                         .show(ui, |ui| {
                             ui.set_min_height(100.0);
-                            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                                let default_selected = selected_audio.is_none();
-                                if device_row(
-                                    ui,
-                                    chrome,
-                                    t(language, "monitor.audio_default"),
-                                    default_selected,
-                                ) {
-                                    action = Some(PrefsAction::SetAudioDevice(None));
-                                }
-                                if audio_devices.is_empty() {
-                                    ui.label(
-                                        RichText::new(t(language, "monitor.audio_none"))
-                                            .color(chrome.text_muted)
-                                            .small(),
-                                    );
-                                } else {
-                                    for dev in audio_devices {
-                                        let sel = selected_audio == Some(dev.name.as_str());
-                                        if device_row(ui, chrome, &dev.name, sel) {
-                                            action = Some(PrefsAction::SetAudioDevice(Some(
-                                                dev.name.clone(),
-                                            )));
+                            egui::ScrollArea::vertical()
+                                .max_height(120.0)
+                                .show(ui, |ui| {
+                                    let default_selected = selected_audio.is_none();
+                                    if device_row(
+                                        ui,
+                                        chrome,
+                                        t(language, "monitor.audio_default"),
+                                        default_selected,
+                                    ) {
+                                        action = Some(PrefsAction::SetAudioDevice(None));
+                                    }
+                                    if audio_devices.is_empty() {
+                                        ui.label(
+                                            RichText::new(t(language, "monitor.audio_none"))
+                                                .color(chrome.text_muted)
+                                                .small(),
+                                        );
+                                    } else {
+                                        for dev in audio_devices {
+                                            let sel = selected_audio == Some(dev.name.as_str());
+                                            if device_row(ui, chrome, &dev.name, sel) {
+                                                action = Some(PrefsAction::SetAudioDevice(Some(
+                                                    dev.name.clone(),
+                                                )));
+                                            }
                                         }
                                     }
-                                }
-                            });
+                                });
                         });
 
                     // —— A/V buffer (text fields) ——
@@ -370,6 +373,7 @@ pub fn show(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn buffer_frames_field(
     ui: &mut Ui,
     chrome: UiChrome,
@@ -406,9 +410,7 @@ fn buffer_frames_field(
                 .desired_width(120.0)
                 .hint_text("frames"),
         );
-        ui.label(
-            RichText::new(t(language, "monitor.buffer_frames")).color(chrome.text_muted),
-        );
+        ui.label(RichText::new(t(language, "monitor.buffer_frames")).color(chrome.text_muted));
         let enter = resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         if enter || resp.lost_focus() {
             if let Ok(frames) = edit.trim().parse::<u32>() {
@@ -470,11 +472,7 @@ fn chip_button(ui: &mut Ui, chrome: UiChrome, label: &str, active: bool) -> bool
     } else {
         chrome.surface
     };
-    let stroke = if active {
-        chrome.accent
-    } else {
-        chrome.border
-    };
+    let stroke = if active { chrome.accent } else { chrome.border };
     let text = if active { chrome.accent } else { chrome.text };
     let button = egui::Button::new(RichText::new(label).color(text).size(13.0))
         .fill(fill)
