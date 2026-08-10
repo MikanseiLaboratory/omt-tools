@@ -3,8 +3,8 @@ name = "omt-launcher"
 version.workspace = true
 description = "OMT Tools launcher"
 authors.workspace = true
-edition = "2021"
-rust-version = "1.88"
+edition = "2024"
+rust-version = "1.97"
 license.workspace = true
 
 [lib]

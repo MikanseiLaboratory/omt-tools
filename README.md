@@ -30,7 +30,7 @@ Official `libomt` / `libomtnet` / `libvmx` are reference-only and are not modifi
 
 ## Prerequisites
 
-- Rust **1.88+** (edition 2024)
+- Rust **1.97+** (edition 2024)
 - Bun 1.2+ (launcher frontend)
 - Sibling checkouts:
   - `../openmediatransport-rs`

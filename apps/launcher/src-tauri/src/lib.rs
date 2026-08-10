@@ -4,8 +4,8 @@ mod tools;
 
 use serde::{Deserialize, Serialize};
 use suite_core::{
-    load_config, save_config, suite_manifest, t, Language, SimdCapabilities, SuiteManifest,
-    ThemePreference, ToolId,
+    Language, SimdCapabilities, SuiteManifest, ThemePreference, ToolId, load_config, save_config,
+    suite_manifest, t,
 };
 
 #[derive(Debug, Serialize)]

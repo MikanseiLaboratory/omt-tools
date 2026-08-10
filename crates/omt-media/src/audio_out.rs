@@ -41,15 +41,13 @@ pub struct AudioOutputDevice {
 /// List available cpal output devices (best-effort).
 pub fn list_output_devices() -> Vec<AudioOutputDevice> {
     let host = cpal::default_host();
-    let default_name = host.default_output_device().and_then(|d| d.name().ok());
+    let default_name = host.default_output_device().map(|d| d.to_string());
     let Ok(devices) = host.output_devices() else {
         return Vec::new();
     };
     let mut out = Vec::new();
     for device in devices {
-        let Ok(name) = device.name() else {
-            continue;
-        };
+        let name = device.to_string();
         let is_default = default_name.as_ref() == Some(&name);
         out.push(AudioOutputDevice { name, is_default });
     }
@@ -372,7 +370,7 @@ fn resolve_device(name: &Option<String>) -> Result<cpal::Device, String> {
     if let Some(want) = name {
         let devices = host.output_devices().map_err(|e| e.to_string())?;
         for device in devices {
-            if device.name().ok().as_ref() == Some(want) {
+            if &device.to_string() == want {
                 return Ok(device);
             }
         }
@@ -420,7 +418,7 @@ fn run_output_thread(shared: Arc<Shared>, cmd_rx: mpsc::Receiver<AudioCmd>) -> R
         {
             let mut geo = shared.geometry.lock();
             geo.channels = config.channels as usize;
-            geo.rate = config.sample_rate.0;
+            geo.rate = config.sample_rate;
         }
         shared.ring.lock().clear();
         shared.pts_runs.lock().clear();
@@ -486,7 +484,7 @@ where
     let channels = config.channels.max(1) as usize;
     device
         .build_output_stream(
-            config,
+            *config,
             move |data: &mut [T], _| {
                 let mut ring = shared.ring.lock();
                 let mut got = 0usize;

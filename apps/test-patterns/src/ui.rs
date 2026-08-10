@@ -574,10 +574,10 @@ impl PatternsView {
 
         let was_selected =
             self.kind == PatternKind::Image && self.selected_custom.is_some_and(|i| i == index);
-        if let Some(sel) = self.selected_custom.as_mut() {
-            if *sel > index {
-                *sel -= 1;
-            }
+        if let Some(sel) = self.selected_custom.as_mut()
+            && *sel > index
+        {
+            *sel -= 1;
         }
         if was_selected {
             self.selected_custom = None;
@@ -605,10 +605,10 @@ impl PatternsView {
 
     fn reveal_custom_image(&mut self, index: usize, cx: &mut Context<Self>) {
         self.custom_menu = None;
-        if let Some(entry) = self.custom_images.get(index) {
-            if let Err(e) = reveal_in_file_manager(&entry.path) {
-                self.error = Some(SharedString::from(e.to_string()));
-            }
+        if let Some(entry) = self.custom_images.get(index)
+            && let Err(e) = reveal_in_file_manager(&entry.path)
+        {
+            self.error = Some(SharedString::from(e.to_string()));
         }
         cx.notify();
     }

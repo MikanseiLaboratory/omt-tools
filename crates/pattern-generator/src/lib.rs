@@ -341,9 +341,9 @@ fn fill_grid(dst: &mut [u8], w: usize, h: usize, stride: usize, phase_x: f32, ph
     let shift_y = phase_offset(phase_y, spacing);
     for y in 0..h {
         for x in (0..w).step_by(2) {
-            let on = ((x + shift_x) % spacing == 0)
-                || ((x + 1 + shift_x) % spacing == 0)
-                || ((y + shift_y) % spacing == 0);
+            let on = (x + shift_x).is_multiple_of(spacing)
+                || (x + 1 + shift_x).is_multiple_of(spacing)
+                || (y + shift_y).is_multiple_of(spacing);
             let (r, g, b) = if on { (235, 235, 235) } else { (16, 16, 16) };
             let (y0, u0, v0) = rgb_to_uyvy_pixel(r, g, b);
             let (y1, u1, v1) = rgb_to_uyvy_pixel(r, g, b);

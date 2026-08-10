@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use suite_core::{load_config, LaunchOverrides, ToolId};
+use suite_core::{LaunchOverrides, ToolId, load_config};
 use tauri::{AppHandle, Manager};
 
 /// Resolve the on-disk path for a bundled tool binary.

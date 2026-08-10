@@ -15,10 +15,10 @@ struct FontCandidate {
 /// falls back to Chinese-primary fonts (e.g. Microsoft YaHei / pan-CJK CJK).
 pub fn load_cjk_font() -> Option<(Vec<u8>, u32)> {
     for cand in japanese_ui_font_candidates() {
-        if let Ok(bytes) = std::fs::read(cand.path) {
-            if !bytes.is_empty() {
-                return Some((bytes, cand.index));
-            }
+        if let Ok(bytes) = std::fs::read(cand.path)
+            && !bytes.is_empty()
+        {
+            return Some((bytes, cand.index));
         }
     }
     None
@@ -38,23 +38,18 @@ pub fn install_egui_cjk_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
 
     // Latin: Segoe UI (clean modern Windows UI).
-    if let Ok(bytes) = std::fs::read(r"C:\Windows\Fonts\segoeui.ttf") {
-        if !bytes.is_empty() {
-            fonts.font_data.insert(
-                "omt_latin".into(),
-                Arc::new(egui::FontData::from_owned(bytes)),
-            );
-        }
+    if let Ok(bytes) = std::fs::read(r"C:\Windows\Fonts\segoeui.ttf")
+        && !bytes.is_empty()
+    {
+        fonts.font_data.insert(
+            "omt_latin".into(),
+            Arc::new(egui::FontData::from_owned(bytes)),
+        );
     }
 
     if let Some((bytes, index)) = load_cjk_font() {
         let mut data = egui::FontData::from_owned(bytes);
         data.index = index;
-        data = data.tweak(egui::FontTweak {
-            scale: 1.0,
-            y_offset_factor: 0.0,
-            y_offset: 0.0,
-        });
         fonts.font_data.insert("omt_jp".into(), Arc::new(data));
     }
 
@@ -72,10 +67,10 @@ pub fn install_egui_cjk_fonts(ctx: &egui::Context) {
             proportional.insert(insert_at, "omt_latin".into());
         }
     }
-    if let Some(monospace) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-        if fonts.font_data.contains_key("omt_jp") {
-            monospace.push("omt_jp".into());
-        }
+    if let Some(monospace) = fonts.families.get_mut(&egui::FontFamily::Monospace)
+        && fonts.font_data.contains_key("omt_jp")
+    {
+        monospace.push("omt_jp".into());
     }
 
     ctx.set_fonts(fonts);

@@ -722,31 +722,32 @@ impl MonitorApp {
 }
 
 impl eframe::App for MonitorApp {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        self.apply_theme_if_needed(ctx);
-        let got_frame = self.on_tick(ctx);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        self.apply_theme_if_needed(&ctx);
+        let got_frame = self.on_tick(&ctx);
 
         // Escape handling
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             if self.preferences_open {
                 self.preferences_open = false;
             } else if self.fullscreen {
-                self.exit_fullscreen(ctx);
+                self.exit_fullscreen(&ctx);
             }
         }
 
-        let chrome = self.chrome(ctx);
+        let chrome = self.chrome(&ctx);
         let connected = self.selected.is_some();
 
         if self.fullscreen {
-            self.ui_fullscreen(ctx, chrome);
+            self.ui_fullscreen(ui, &ctx, chrome);
         } else {
-            self.ui_windowed(ctx, chrome);
+            self.ui_windowed(ui, chrome);
         }
 
-        if self.preferences_open {
-            if let Some(action) = preferences::show(
-                ctx,
+        if self.preferences_open
+            && let Some(action) = preferences::show(
+                &ctx,
                 self.language,
                 self.theme,
                 chrome,
@@ -760,9 +761,9 @@ impl eframe::App for MonitorApp {
                 self.buffer_fps().0,
                 self.buffer_fps().1,
                 &mut self.buffer_edit,
-            ) {
-                self.apply_prefs_action(action, ctx);
-            }
+            )
+        {
+            self.apply_prefs_action(action, &ctx);
         }
 
         // Repaint when a prepared frame arrives (prep thread also requests).
@@ -780,10 +781,10 @@ impl eframe::App for MonitorApp {
 }
 
 impl MonitorApp {
-    fn ui_fullscreen(&mut self, ctx: &Context, chrome: UiChrome) {
+    fn ui_fullscreen(&mut self, ui: &mut egui::Ui, ctx: &Context, chrome: UiChrome) {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(Color32::BLACK))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let full = ui.max_rect();
                 self.preview_w = full.width();
                 self.preview_h = full.height();
@@ -810,10 +811,10 @@ impl MonitorApp {
             });
     }
 
-    fn ui_windowed(&mut self, ctx: &Context, chrome: UiChrome) {
+    fn ui_windowed(&mut self, ui: &mut egui::Ui, chrome: UiChrome) {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(chrome.bg))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let total = ui.available_rect_before_wrap();
                 let log_h = LOG_H.min(total.height() * 0.35);
                 let top_h = (total.height() - log_h).max(100.0);
