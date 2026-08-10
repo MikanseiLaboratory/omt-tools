@@ -32,7 +32,9 @@ const PREVIEW_W: i32 = 240;
 const PREVIEW_H: i32 = 135;
 const GRID_COLS: usize = 4;
 const TILE_W: f32 = 220.0;
-const SIDE_PANEL_W: f32 = 280.0;
+const SIDE_PANEL_W: f32 = 360.0;
+/// Bottom padding under the output preview so it is not flush with the window edge.
+const PREVIEW_BOTTOM_MARGIN: f32 = 10.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FrameRate {
@@ -107,6 +109,48 @@ impl TonePreset {
     }
 }
 
+/// Discrete tone level presets (dBFS).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LevelPreset(f32);
+
+impl LevelPreset {
+    const PRESETS: &[LevelPreset] = &[
+        LevelPreset(0.0),
+        LevelPreset(-6.0),
+        LevelPreset(-10.0),
+        LevelPreset(-20.0),
+    ];
+
+    fn dbfs(self) -> f32 {
+        self.0
+    }
+
+    fn label(self) -> SharedString {
+        if self.0 == 0.0 {
+            SharedString::from("0 dBFS")
+        } else {
+            SharedString::from(format!("{} dBFS", self.0 as i32))
+        }
+    }
+
+    fn matches(self, level_dbfs: f32) -> bool {
+        (level_dbfs - self.0).abs() < 0.05
+    }
+
+    fn nearest(level_dbfs: f32) -> LevelPreset {
+        let mut best = Self::PRESETS[3];
+        let mut best_dist = (best.0 - level_dbfs).abs();
+        for preset in Self::PRESETS {
+            let dist = (preset.0 - level_dbfs).abs();
+            if dist < best_dist {
+                best = *preset;
+                best_dist = dist;
+            }
+        }
+        best
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Resolution {
     width: i32,
@@ -136,9 +180,10 @@ impl Resolution {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuKind {
+    Resolution,
     Tone,
     Fps,
-    Resolution,
+    Level,
 }
 
 fn tone_label(language: Language, tone_hz: f32) -> SharedString {
@@ -675,25 +720,6 @@ impl PatternsView {
         cx.notify();
     }
 
-    fn nudge_tone_hz(&mut self, delta: f32, cx: &mut Context<Self>) {
-        if self.tone_hz <= 0.0 && delta < 0.0 {
-            cx.notify();
-            return;
-        }
-        let next = if self.tone_hz <= 0.0 {
-            delta.max(20.0)
-        } else {
-            (self.tone_hz + delta).clamp(20.0, 8_000.0)
-        };
-        if (self.tone_hz - next).abs() < f32::EPSILON {
-            cx.notify();
-            return;
-        }
-        self.tone_hz = next;
-        self.apply_settings();
-        cx.notify();
-    }
-
     fn set_frame_rate(&mut self, frame_rate: FrameRate, cx: &mut Context<Self>) {
         self.open_menu = None;
         if self.frame_rate == frame_rate {
@@ -777,53 +803,14 @@ impl PatternsView {
         cx.notify();
     }
 
-    fn nudge_level_dbfs(&mut self, delta: f32, cx: &mut Context<Self>) {
-        let next = ((self.level_dbfs + delta) * 10.0).round() / 10.0;
-        let next = next.clamp(-120.0, 0.0);
-        if (self.level_dbfs - next).abs() < f32::EPSILON {
+    fn set_level(&mut self, level: LevelPreset, cx: &mut Context<Self>) {
+        self.open_menu = None;
+        let dbfs = level.dbfs();
+        if (self.level_dbfs - dbfs).abs() < f32::EPSILON {
             cx.notify();
             return;
         }
-        self.level_dbfs = next;
-        self.apply_settings();
-        cx.notify();
-    }
-
-    fn nudge_sample_rate(&mut self, delta: i32, cx: &mut Context<Self>) {
-        const RATES: &[i32] = &[44_100, 48_000, 96_000];
-        let idx = RATES
-            .iter()
-            .position(|&r| r == self.sample_rate)
-            .unwrap_or(1);
-        let next_idx = (idx as i32 + delta).clamp(0, (RATES.len() - 1) as i32) as usize;
-        let next = RATES[next_idx];
-        if next == self.sample_rate {
-            cx.notify();
-            return;
-        }
-        self.sample_rate = next;
-        self.apply_settings();
-        cx.notify();
-    }
-
-    fn nudge_channels(&mut self, delta: i32, cx: &mut Context<Self>) {
-        let next = (self.channels + delta).clamp(1, 16);
-        if next == self.channels {
-            cx.notify();
-            return;
-        }
-        self.channels = next;
-        self.apply_settings();
-        cx.notify();
-    }
-
-    fn nudge_samples(&mut self, delta: i32, cx: &mut Context<Self>) {
-        let next = (self.samples + delta).clamp(64, 4096);
-        if next == self.samples {
-            cx.notify();
-            return;
-        }
-        self.samples = next;
+        self.level_dbfs = dbfs;
         self.apply_settings();
         cx.notify();
     }
@@ -1019,9 +1006,6 @@ impl Render for PatternsView {
         let speed_h = self.anim_speed_h_pct;
         let speed_v = self.anim_speed_v_pct;
         let level_dbfs = self.level_dbfs;
-        let sample_rate = self.sample_rate;
-        let channels = self.channels;
-        let samples = self.samples;
 
         let mut root =
             div()
@@ -1128,17 +1112,15 @@ impl Render for PatternsView {
                                     t(language, "simd"),
                                     SimdCapabilities::detect().summary(),
                                 ))
-                                .children(if stats.behind {
-                                    Some(
-                                        div()
-                                            .mt_2()
-                                            .text_xs()
-                                            .text_color(rgb(0xf6c344))
-                                            .child(t(language, "patterns.perf_warn")),
-                                    )
-                                } else {
-                                    None
-                                })
+                                .child(
+                                    div()
+                                        .mt_2()
+                                        .min_h(px(36.0))
+                                        .text_xs()
+                                        .text_color(rgb(0xf6c344))
+                                        .opacity(if stats.behind { 1.0 } else { 0.0 })
+                                        .child(t(language, "patterns.perf_warn")),
+                                )
                                 .children(error.map(|e| {
                                     div().mt_2().text_xs().text_color(rgb(0xff6b6b)).child(e)
                                 }))
@@ -1149,13 +1131,6 @@ impl Render for PatternsView {
                                         .child(t(language, "patterns.settings")),
                                 )
                                 .child(name_field(cx, language, &name, name_editing))
-                                .child(resolution_control(
-                                    cx,
-                                    language,
-                                    width,
-                                    height,
-                                    open_menu == Some(MenuKind::Resolution),
-                                ))
                                 .child(toggle_row(
                                     cx,
                                     "animate-toggle",
@@ -1178,50 +1153,6 @@ impl Render for PatternsView {
                                     format!("{speed_v}%"),
                                     |this, cx| this.nudge_anim_speed_v(-10, cx),
                                     |this, cx| this.nudge_anim_speed_v(10, cx),
-                                ))
-                                .child(stepper_row(
-                                    cx,
-                                    "tone-hz",
-                                    t(language, "patterns.tone_hz"),
-                                    if tone_hz <= 0.0 {
-                                        "—".into()
-                                    } else {
-                                        format!("{tone_hz:.0} Hz")
-                                    },
-                                    |this, cx| this.nudge_tone_hz(-10.0, cx),
-                                    |this, cx| this.nudge_tone_hz(10.0, cx),
-                                ))
-                                .child(stepper_row(
-                                    cx,
-                                    "tone-level",
-                                    t(language, "patterns.tone_level"),
-                                    format!("{level_dbfs:.1}"),
-                                    |this, cx| this.nudge_level_dbfs(-1.0, cx),
-                                    |this, cx| this.nudge_level_dbfs(1.0, cx),
-                                ))
-                                .child(stepper_row(
-                                    cx,
-                                    "sample-rate",
-                                    t(language, "patterns.sample_rate"),
-                                    format!("{sample_rate}"),
-                                    |this, cx| this.nudge_sample_rate(-1, cx),
-                                    |this, cx| this.nudge_sample_rate(1, cx),
-                                ))
-                                .child(stepper_row(
-                                    cx,
-                                    "channels",
-                                    t(language, "patterns.channels"),
-                                    format!("{channels}"),
-                                    |this, cx| this.nudge_channels(-1, cx),
-                                    |this, cx| this.nudge_channels(1, cx),
-                                ))
-                                .child(stepper_row(
-                                    cx,
-                                    "samples",
-                                    t(language, "patterns.samples"),
-                                    format!("{samples}"),
-                                    |this, cx| this.nudge_samples(-16, cx),
-                                    |this, cx| this.nudge_samples(16, cx),
                                 )),
                         ),
                 )
@@ -1229,13 +1160,21 @@ impl Render for PatternsView {
                 .child(
                     div()
                         .px_4()
-                        .py_3()
+                        .pt_3()
+                        .pb(px(PREVIEW_BOTTOM_MARGIN))
                         .gap_4()
                         .flex()
                         .items_end()
                         .border_t_1()
                         .border_color(rgb(0x2a3340))
                         .bg(rgb(0x12161c))
+                        .child(resolution_control(
+                            cx,
+                            language,
+                            width,
+                            height,
+                            open_menu == Some(MenuKind::Resolution),
+                        ))
                         .child(tone_control(
                             cx,
                             language,
@@ -1249,6 +1188,12 @@ impl Render for PatternsView {
                             open_menu == Some(MenuKind::Fps),
                         ))
                         .child(quality_control(cx, language, profile))
+                        .child(level_control(
+                            cx,
+                            language,
+                            level_dbfs,
+                            open_menu == Some(MenuKind::Level),
+                        ))
                         .child(transport_controls(cx, language, sending))
                         .child(div().flex_1())
                         .child(output_preview(language, preview)),
@@ -1262,6 +1207,7 @@ impl Render for PatternsView {
                 open_menu,
                 tone_hz,
                 frame_rate,
+                level_dbfs,
                 width,
                 height,
                 custom_menu,
@@ -1279,6 +1225,7 @@ fn overlay_layer(
     open_menu: Option<MenuKind>,
     tone_hz: f32,
     frame_rate: FrameRate,
+    level_dbfs: f32,
     width: i32,
     height: i32,
     custom_menu: Option<(usize, f32, f32)>,
@@ -1304,29 +1251,28 @@ fn overlay_layer(
         );
 
     if let Some(menu) = open_menu {
-        let (anchor_bottom, left, menu_width) = match menu {
-            MenuKind::Tone => (true, px(16.0), px(160.0)),
-            MenuKind::Fps => (true, px(172.0), px(100.0)),
-            // Side-panel resolution menu: near the right edge below the title.
-            MenuKind::Resolution => (false, px(0.0), px(160.0)),
+        // Footer control left edges (padding 16 + cumulative widths + gap 16).
+        let (left, menu_width) = match menu {
+            MenuKind::Resolution => (px(16.0), px(168.0)),
+            MenuKind::Tone => (px(148.0), px(160.0)),
+            MenuKind::Fps => (px(304.0), px(100.0)),
+            // After quality segmented control (~130px).
+            MenuKind::Level => (px(538.0), px(120.0)),
         };
-        let mut menu_div = div()
+        let menu_div = div()
             .absolute()
             .w(menu_width)
+            .bottom(px(72.0))
+            .left(left)
             .p_1()
             .rounded_md()
             .border_1()
             .border_color(rgb(0x2a3340))
             .bg(rgb(0x1b222c))
+            .text_color(rgb(0xedf2f7))
             .shadow_md()
             .occlude()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
-        if anchor_bottom {
-            menu_div = menu_div.bottom(px(72.0)).left(left);
-        } else {
-            // Align with side panel settings area.
-            menu_div = menu_div.top(px(220.0)).right(px(16.0));
-        }
         layer = layer.child(
             menu_div.children(match menu {
                 MenuKind::Tone => TonePreset::PRESETS
@@ -1334,20 +1280,13 @@ fn overlay_layer(
                     .map(|preset| {
                         let preset = *preset;
                         let active = preset.matches(tone_hz);
-                        div()
-                            .id(SharedString::from(format!("tone-{}", preset.hz())))
-                            .px_2()
-                            .py_1()
-                            .rounded_sm()
-                            .bg(if active { rgb(0x2f6fed) } else { rgb(0x1b222c) })
-                            .hover(|s| s.bg(rgb(0x243041)))
-                            .cursor_pointer()
-                            .text_xs()
-                            .child(preset.label(language))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.set_tone(preset, cx);
-                            }))
-                            .into_any_element()
+                        dropdown_item(
+                            cx,
+                            SharedString::from(format!("tone-{}", preset.hz())),
+                            preset.label(language),
+                            active,
+                            move |this, cx| this.set_tone(preset, cx),
+                        )
                     })
                     .collect::<Vec<_>>(),
                 MenuKind::Fps => FrameRate::PRESETS
@@ -1355,20 +1294,27 @@ fn overlay_layer(
                     .map(|preset| {
                         let preset = *preset;
                         let active = frame_rate == preset;
-                        div()
-                            .id(SharedString::from(format!("fps-{}-{}", preset.n, preset.d)))
-                            .px_2()
-                            .py_1()
-                            .rounded_sm()
-                            .bg(if active { rgb(0x2f6fed) } else { rgb(0x1b222c) })
-                            .hover(|s| s.bg(rgb(0x243041)))
-                            .cursor_pointer()
-                            .text_xs()
-                            .child(preset.label())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.set_frame_rate(preset, cx);
-                            }))
-                            .into_any_element()
+                        dropdown_item(
+                            cx,
+                            SharedString::from(format!("fps-{}-{}", preset.n, preset.d)),
+                            SharedString::from(preset.label()),
+                            active,
+                            move |this, cx| this.set_frame_rate(preset, cx),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                MenuKind::Level => LevelPreset::PRESETS
+                    .iter()
+                    .map(|preset| {
+                        let preset = *preset;
+                        let active = preset.matches(level_dbfs);
+                        dropdown_item(
+                            cx,
+                            SharedString::from(format!("level-{}", preset.dbfs() as i32)),
+                            preset.label(),
+                            active,
+                            move |this, cx| this.set_level(preset, cx),
+                        )
                     })
                     .collect::<Vec<_>>(),
                 MenuKind::Resolution => {
@@ -1377,23 +1323,16 @@ fn overlay_layer(
                         .map(|preset| {
                             let preset = *preset;
                             let active = width == preset.width && height == preset.height;
-                            div()
-                                .id(SharedString::from(format!(
+                            dropdown_item(
+                                cx,
+                                SharedString::from(format!(
                                     "res-{}-{}",
                                     preset.width, preset.height
-                                )))
-                                .px_2()
-                                .py_1()
-                                .rounded_sm()
-                                .bg(if active { rgb(0x2f6fed) } else { rgb(0x1b222c) })
-                                .hover(|s| s.bg(rgb(0x243041)))
-                                .cursor_pointer()
-                                .text_xs()
-                                .child(preset.label())
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.set_resolution(preset, cx);
-                                }))
-                                .into_any_element()
+                                )),
+                                SharedString::from(preset.label()),
+                                active,
+                                move |this, cx| this.set_resolution(preset, cx),
+                            )
                         })
                         .collect();
                     items.push(
@@ -1409,7 +1348,7 @@ fn overlay_layer(
                                 div()
                                     .px_1()
                                     .text_xs()
-                                    .opacity(0.65)
+                                    .text_color(rgb(0xa0aec0))
                                     .child(format!("W {width}")),
                             )
                             .child(
@@ -1427,7 +1366,7 @@ fn overlay_layer(
                                 div()
                                     .px_1()
                                     .text_xs()
-                                    .opacity(0.65)
+                                    .text_color(rgb(0xa0aec0))
                                     .child(format!("H {height}")),
                             )
                             .child(
@@ -1461,41 +1400,57 @@ fn overlay_layer(
                 .border_1()
                 .border_color(rgb(0x2a3340))
                 .bg(rgb(0x1b222c))
+                .text_color(rgb(0xedf2f7))
                 .shadow_md()
                 .occlude()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(
-                    div()
-                        .id("custom-image-reveal")
-                        .px_3()
-                        .py_1()
-                        .rounded_sm()
-                        .hover(|s| s.bg(rgb(0x243041)))
-                        .cursor_pointer()
-                        .text_xs()
-                        .child(t(language, "patterns.image_reveal"))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.reveal_custom_image(index, cx);
-                        })),
-                )
-                .child(
-                    div()
-                        .id("custom-image-remove")
-                        .px_3()
-                        .py_1()
-                        .rounded_sm()
-                        .hover(|s| s.bg(rgb(0x243041)))
-                        .cursor_pointer()
-                        .text_xs()
-                        .child(t(language, "patterns.image_remove"))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.remove_custom_image(index, cx);
-                        })),
-                ),
+                .child(dropdown_item(
+                    cx,
+                    SharedString::from("custom-image-reveal"),
+                    SharedString::from(t(language, "patterns.image_reveal")),
+                    false,
+                    move |this, cx| this.reveal_custom_image(index, cx),
+                ))
+                .child(dropdown_item(
+                    cx,
+                    SharedString::from("custom-image-remove"),
+                    SharedString::from(t(language, "patterns.image_remove")),
+                    false,
+                    move |this, cx| this.remove_custom_image(index, cx),
+                )),
         );
     }
 
     layer
+}
+
+fn dropdown_item<F>(
+    cx: &mut Context<PatternsView>,
+    id: SharedString,
+    label: SharedString,
+    active: bool,
+    on_click: F,
+) -> gpui::AnyElement
+where
+    F: Fn(&mut PatternsView, &mut Context<PatternsView>) + 'static + Clone,
+{
+    let handler = on_click.clone();
+    let hover_bg = if active { rgb(0x3d7cff) } else { rgb(0x2f3b4d) };
+    div()
+        .id(id)
+        .px_3()
+        .py_1()
+        .rounded_sm()
+        .bg(if active { rgb(0x2f6fed) } else { rgb(0x1b222c) })
+        .text_color(rgb(0xedf2f7))
+        .hover(move |s| s.bg(hover_bg).text_color(rgb(0xedf2f7)).opacity(1.0))
+        .cursor_pointer()
+        .text_xs()
+        .child(label)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            handler(this, cx);
+        }))
+        .into_any_element()
 }
 
 fn pattern_grid(
@@ -1861,6 +1816,7 @@ fn resolution_control(
         .child(
             div()
                 .id("resolution-toggle")
+                .w(px(110.0))
                 .px_2()
                 .py_1()
                 .rounded_md()
@@ -1870,6 +1826,40 @@ fn resolution_control(
                 .child(format!("{width}×{height}"))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_menu(MenuKind::Resolution, cx);
+                })),
+        )
+}
+
+fn level_control(
+    cx: &mut Context<PatternsView>,
+    language: Language,
+    level_dbfs: f32,
+    open: bool,
+) -> impl IntoElement {
+    let display = LevelPreset::nearest(level_dbfs).label();
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .text_xs()
+                .opacity(0.65)
+                .child(t(language, "patterns.tone_level")),
+        )
+        .child(
+            div()
+                .id("level-toggle")
+                .w(px(100.0))
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .bg(if open { rgb(0x2f6fed) } else { rgb(0x243041) })
+                .cursor_pointer()
+                .text_xs()
+                .child(display)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.toggle_menu(MenuKind::Level, cx);
                 })),
         )
 }
@@ -2059,6 +2049,7 @@ fn output_preview(language: Language, preview: Option<Arc<RenderImage>>) -> impl
     div()
         .flex()
         .flex_col()
+        .items_end()
         .gap_1()
         .child(
             div()
@@ -2091,8 +2082,20 @@ fn stat_row(label: &str, value: String) -> impl IntoElement {
     div()
         .flex()
         .justify_between()
-        .gap_2()
+        .gap_3()
         .text_xs()
-        .child(div().opacity(0.65).child(label.to_string()))
-        .child(div().font_weight(FontWeight::MEDIUM).child(value))
+        .child(
+            div()
+                .opacity(0.65)
+                .flex_shrink_0()
+                .child(label.to_string()),
+        )
+        .child(
+            div()
+                .font_weight(FontWeight::MEDIUM)
+                .min_w_0()
+                .flex_1()
+                .text_right()
+                .child(value),
+        )
 }
