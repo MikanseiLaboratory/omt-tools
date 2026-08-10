@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="icon" type="image/png" href="/src/assets/O-Logo-Alpha.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OMT Tools</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <div class="shell" id="shell">
+      <header class="topbar">
+        <button type="button" class="top-link" id="docs-btn" title="Docs">
+          <span class="top-link-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H14l6 6v8.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13Z" />
+              <path d="M14 4v5h5" />
+            </svg>
+          </span>
+          <span id="docs-label">Docs &amp; Guides</span>
+        </button>
+
+        <h1 class="brand" id="title">
+          <img
+            class="brand-logo brand-logo-light"
+            src="/src/assets/OMTLogo-Alpha.png"
+            width="220"
+            height="117"
+            alt=""
+            decoding="async"
+          />
+          <img
+            class="brand-logo brand-logo-dark"
+            src="/src/assets/OMTLogo-Dark-Alpha.png"
+            width="220"
+            height="117"
+            alt=""
+            decoding="async"
+          />
+          <span class="visually-hidden" id="title-text">OMT Tools</span>
+        </h1>
+
+        <button type="button" class="icon-btn" id="settings-btn" aria-label="Settings" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7">
+            <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+            <path d="M19.4 13.5a7.8 7.8 0 0 0 .1-1.5 7.8 7.8 0 0 0-.1-1.5l2-1.6-1.9-3.3-2.4.8a7.4 7.4 0 0 0-2.6-1.5L12.9 2h-3.8L8.5 4.9a7.4 7.4 0 0 0-2.6 1.5l-2.4-.8L1.6 8.9l2 1.6a7.8 7.8 0 0 0-.1 1.5c0 .5 0 1 .1 1.5l-2 1.6 1.9 3.3 2.4-.8a7.4 7.4 0 0 0 2.6 1.5l.6 2.9h3.8l.6-2.9a7.4 7.4 0 0 0 2.6-1.5l2.4.8 1.9-3.3-2-1.6Z" />
+          </svg>
+        </button>
+      </header>
+
+      <main class="page" id="page">
+        <section class="tool-grid" id="tool-grid" aria-label="Tools"></section>
+      </main>
+
+      <footer class="footer">
+        <div class="footer-left">
+          <span id="footer-version-label">Version</span>
+          <span id="footer-version">0.1.0</span>
+        </div>
+        <a class="footer-center" id="footer-site" href="https://github.com/MikanseiLaboratory/omt-tools" target="_blank" rel="noreferrer">
+          github.com/MikanseiLaboratory/omt-tools
+        </a>
+        <div class="footer-right" id="footer-copy">© MikanseiLaboratory</div>
+      </footer>
+
+      <div class="settings-backdrop hidden" id="settings-backdrop"></div>
+      <aside class="settings-panel hidden" id="settings-panel" role="dialog" aria-labelledby="settings-title">
+        <div class="settings-section">
+          <div class="settings-row">
+            <div>
+              <div class="settings-kicker" id="version-label">Version</div>
+              <div class="settings-version" id="suite-version">0.1.0</div>
+            </div>
+          </div>
+          <pre class="settings-manifest" id="manifest-tools"></pre>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-kicker" id="simd-label">SIMD</div>
+          <pre class="settings-manifest" id="simd-info"></pre>
+        </div>
+
+        <div class="settings-section">
+          <h2 class="settings-title" id="settings-title">Settings</h2>
+          <label class="field">
+            <span id="language-label">Language</span>
+            <select id="language-select">
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+            </select>
+          </label>
+          <label class="field">
+            <span id="theme-label">Theme</span>
+            <select id="theme-select">
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+          <button type="button" class="primary-btn" id="save-settings">Save</button>
+          <p class="settings-status" id="settings-status"></p>
+        </div>
+      </aside>
+
+      <p class="toast hidden" id="status" role="status"></p>
+    </div>
+  </body>
+</html>

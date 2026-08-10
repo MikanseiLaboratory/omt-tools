@@ -1,0 +1,141 @@
+name: 'Publish Pre-Release'
+
+on:
+  push:
+    tags:
+      - 'v*-beta*'
+      - 'v*-alpha*'
+      - 'v*-rc*'
+
+jobs:
+  publish-tauri-prerelease:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            rust_target: 'aarch64-apple-darwin'
+            args: '--target aarch64-apple-darwin'
+          - platform: 'macos-latest'
+            rust_target: 'x86_64-apple-darwin'
+            args: '--target x86_64-apple-darwin'
+          - platform: 'windows-latest'
+            rust_target: 'x86_64-pc-windows-msvc'
+            args: '--target x86_64-pc-windows-msvc --bundles msi,nsis'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.97'
+          targets: ${{ matrix.rust_target }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.2.19'
+
+      - name: Checkout sibling crates
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
+
+      - name: Build sidecar tools
+        run: cargo build --release --target ${{ matrix.rust_target }} -p omt-studio-monitor -p omt-test-patterns
+
+      - name: Prepare sidecars (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/prepare-sidecars.ps1 -Target ${{ matrix.rust_target }}
+
+      - name: Prepare sidecars (macOS)
+        if: runner.os == 'macOS'
+        run: bash ./scripts/prepare-sidecars.sh ${{ matrix.rust_target }}
+
+      - name: Install frontend dependencies
+        working-directory: apps/launcher
+        run: bun install --frozen-lockfile
+
+      - name: Set build environment variables
+        shell: bash
+        run: |
+          echo "GIT_COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "GIT_BRANCH=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          echo "BUILD_TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_ENV
+
+      - name: Determine pre-release type
+        shell: bash
+        run: |
+          TAG_NAME=${GITHUB_REF_NAME}
+          if [[ $TAG_NAME == *"alpha"* ]]; then
+            echo "PRERELEASE_TYPE=Alpha" >> $GITHUB_ENV
+            echo "PRERELEASE_EMOJI=🚧" >> $GITHUB_ENV
+          elif [[ $TAG_NAME == *"beta"* ]]; then
+            echo "PRERELEASE_TYPE=Beta" >> $GITHUB_ENV
+            echo "PRERELEASE_EMOJI=🧪" >> $GITHUB_ENV
+          elif [[ $TAG_NAME == *"rc"* ]]; then
+            echo "PRERELEASE_TYPE=Release Candidate" >> $GITHUB_ENV
+            echo "PRERELEASE_EMOJI=🎯" >> $GITHUB_ENV
+          else
+            echo "PRERELEASE_TYPE=Pre-Release" >> $GITHUB_ENV
+            echo "PRERELEASE_EMOJI=⚠️" >> $GITHUB_ENV
+          fi
+
+          BASE_VERSION=$(echo $TAG_NAME | sed -E 's/v([0-9]+\.[0-9]+\.[0-9]+)-.*/\1/')
+          PRERELEASE_NUMBER=$(echo $TAG_NAME | sed -E 's/.*\.(.*)/\1/')
+          echo "BASE_VERSION=$BASE_VERSION" >> $GITHUB_ENV
+          echo "PRERELEASE_NUMBER=$PRERELEASE_NUMBER" >> $GITHUB_ENV
+
+      - name: Build Tauri App
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GIT_COMMIT_HASH: ${{ env.GIT_COMMIT_HASH }}
+          GIT_BRANCH: ${{ env.GIT_BRANCH }}
+          BUILD_TIMESTAMP: ${{ env.BUILD_TIMESTAMP }}
+        with:
+          projectPath: './apps/launcher'
+          tagName: ${{ github.ref_name }}
+          releaseName: '${{ env.PRERELEASE_EMOJI }} OMT Tools ${{ github.ref_name }}'
+          releaseBody: |
+            ## ${{ env.PRERELEASE_EMOJI }} Pre-Release: ${{ env.PRERELEASE_TYPE }}
+
+            **⚠️ This is a pre-release version intended for testing purposes.**
+
+            ### What's New in This Pre-Release
+            - Auto-generated pre-release from GitHub Actions
+            - Built from commit: ${{ env.GIT_COMMIT_HASH }}
+            - Branch: ${{ env.GIT_BRANCH }}
+            - Build time: ${{ env.BUILD_TIMESTAMP }}
+
+            ### Important Notes
+            - ⚠️ **Use at your own risk**: This version may contain bugs or unstable features
+            - 🧪 **For testing only**: Not recommended for production use
+            - 📝 **Feedback welcome**: Please report issues on GitHub
+
+            ### Download Instructions
+            Select the appropriate installer for your platform:
+            - **Windows**: `.msi` (WiX) or `-setup.exe` (NSIS)
+            - **macOS (Apple Silicon)**: `.dmg` for `aarch64-apple-darwin`
+            - **macOS (Intel)**: `.dmg` for `x86_64-apple-darwin`
+
+            ### Suite contents
+            The installer includes the launcher plus sidecar tools:
+            - Studio Monitor
+            - Test Patterns
+
+            ---
+            📋 **Full changelog and stable releases**: [View all releases](https://github.com/${{ github.repository }}/releases)
+          releaseDraft: false
+          prerelease: true
+          uploadUpdaterJson: true
+          args: ${{ matrix.args }}

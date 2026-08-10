@@ -1,0 +1,554 @@
+/* Native-feel desktop shell (no OS menu). See:
+   https://qiita.com/akr/items/73515eb5dcf58d7e331c */
+
+:root {
+  color-scheme: dark;
+  --bg: #0a0a0a;
+  --panel: #1a1a1a;
+  --panel-2: #222222;
+  --tile: #171717;
+  --tile-border: #2a2a2a;
+  --text: #f2f2f2;
+  --muted: #9a9a9a;
+  --accent: #e11d2e;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  --radius: 14px;
+  --font: "Segoe UI", "Yu Gothic UI", "Meiryo", "Hiragino Sans", "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ececec;
+  --panel: #ffffff;
+  --panel-2: #f4f4f4;
+  --tile: #ffffff;
+  --tile-border: #d8d8d8;
+  --text: #141414;
+  --muted: #666666;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #ececec;
+    --panel: #ffffff;
+    --panel-2: #f4f4f4;
+    --tile: #ffffff;
+    --tile-border: #d8d8d8;
+    --text: #141414;
+    --muted: #666666;
+    --shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button,
+select,
+a {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+select {
+  cursor: default;
+}
+
+.shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+  background:
+    radial-gradient(1200px 500px at 50% -10%, rgba(80, 80, 80, 0.18), transparent 60%),
+    var(--bg);
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 18px 22px 8px;
+}
+
+.brand {
+  margin: 0;
+  justify-self: center;
+  display: grid;
+  place-items: center;
+  line-height: 0;
+}
+
+.brand-logo {
+  display: block;
+  width: min(220px, 46vw);
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+/* Official Alpha mark on light chrome; Dark mark on dark chrome. */
+.brand-logo-light {
+  display: none;
+}
+
+.brand-logo-dark {
+  display: block;
+}
+
+:root[data-theme="light"] .brand-logo-light {
+  display: block;
+}
+
+:root[data-theme="light"] .brand-logo-dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .brand-logo-light {
+    display: block;
+  }
+
+  :root:not([data-theme="dark"]) .brand-logo-dark {
+    display: none;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.top-link,
+.icon-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+
+.top-link {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.92;
+}
+
+.top-link:hover,
+.icon-btn:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.icon-btn {
+  justify-self: end;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+}
+
+.icon-btn[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.page {
+  overflow: hidden;
+  padding: 18px 48px 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.tool-grid {
+  width: min(820px, 100%);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 20px;
+}
+
+.tool-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 108px;
+  padding: 18px 20px;
+  border-radius: var(--radius);
+  background: var(--tile);
+  border: 1px solid var(--tile-border);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.tool-tile:hover,
+.tool-tile:focus-visible {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent-color, #888) 55%, var(--tile-border));
+  outline: none;
+}
+
+.tool-tile:disabled,
+.tool-tile.is-disabled {
+  opacity: 0.45;
+}
+
+.tool-tile.is-disabled {
+  pointer-events: none;
+}
+
+.tool-tile.is-launching {
+  opacity: 1;
+  pointer-events: none;
+  border-color: color-mix(in srgb, var(--accent-color, #888) 70%, var(--tile-border));
+  background: color-mix(in srgb, var(--accent-color, #888) 10%, var(--tile));
+}
+
+.tool-tile.is-launching .tool-spinner {
+  opacity: 1;
+}
+
+.tool-tile.is-launching .tool-launch-status {
+  opacity: 1;
+  max-height: 1.4em;
+  margin-top: 2px;
+}
+
+.tool-tile.is-launching .tool-desc {
+  opacity: 0;
+  max-height: 0;
+  margin-top: 0;
+  transition-delay: 0ms;
+}
+
+.tool-tile.is-launching .tool-name {
+  font-size: 16px;
+}
+
+.tool-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.tool-name {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  transform-origin: left center;
+  transition: font-size 220ms ease, line-height 220ms ease;
+}
+
+.tool-tile:hover .tool-name,
+.tool-tile:focus-visible .tool-name {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.tool-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  margin-top: 0;
+  transition:
+    opacity 200ms ease,
+    max-height 220ms ease,
+    margin-top 220ms ease;
+}
+
+.tool-tile:hover .tool-desc,
+.tool-tile:focus-visible .tool-desc {
+  opacity: 1;
+  max-height: 3.2em;
+  margin-top: 6px;
+  transition:
+    opacity 240ms ease 80ms,
+    max-height 220ms ease,
+    margin-top 220ms ease;
+}
+
+.tool-launch-status {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  margin-top: 0;
+  transition:
+    opacity 180ms ease,
+    max-height 180ms ease,
+    margin-top 180ms ease;
+}
+
+.tool-spinner {
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent-color, #888) 35%, transparent);
+  border-top-color: var(--accent-color, #888);
+  opacity: 0;
+  flex: 0 0 auto;
+  animation: tool-spin 0.7s linear infinite;
+}
+
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tool-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  border: 3px solid var(--accent-color, #888);
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  background: color-mix(in srgb, var(--accent-color, #888) 8%, transparent);
+  color: var(--text);
+}
+
+.tool-icon svg {
+  width: 30px;
+  height: 30px;
+}
+
+.footer {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 22px 18px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.footer-left {
+  justify-self: start;
+  display: flex;
+  gap: 8px;
+}
+
+.footer-center {
+  justify-self: center;
+  text-decoration: none;
+  color: var(--muted);
+}
+
+.footer-center:hover {
+  color: var(--text);
+}
+
+.footer-right {
+  justify-self: end;
+}
+
+.settings-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  z-index: 20;
+}
+
+.settings-panel {
+  position: absolute;
+  top: 64px;
+  right: 18px;
+  width: min(360px, calc(100% - 28px));
+  max-height: calc(100% - 90px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  z-index: 30;
+  background: var(--panel);
+  border: 1px solid var(--tile-border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.settings-section + .settings-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--tile-border);
+}
+
+.settings-kicker,
+.settings-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-version {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.settings-manifest {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.field span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field select,
+.primary-btn {
+  border-radius: 10px;
+  border: 1px solid var(--tile-border);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0.55em 0.8em;
+}
+
+.primary-btn {
+  width: 100%;
+  margin-top: 4px;
+  background: #2a2a2a;
+}
+
+:root[data-theme="light"] .primary-btn {
+  background: #efefef;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .primary-btn {
+    background: #efefef;
+  }
+}
+
+.primary-btn:hover {
+  border-color: color-mix(in srgb, var(--text) 28%, var(--tile-border));
+}
+
+.settings-status {
+  min-height: 1.2em;
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 56px;
+  transform: translateX(-50%);
+  z-index: 40;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--tile-border);
+  box-shadow: var(--shadow);
+  color: #ff6b6b;
+  max-width: min(520px, calc(100% - 32px));
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (max-width: 720px) {
+  .brand-logo {
+    width: min(168px, 52vw);
+  }
+
+  .page {
+    padding: 12px 16px;
+  }
+
+  .tool-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-name {
+    font-size: 22px;
+  }
+
+  .tool-tile:hover .tool-name,
+  .tool-tile:focus-visible .tool-name,
+  .tool-tile.is-launching .tool-name {
+    font-size: 15px;
+  }
+
+  .footer {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .footer-left,
+  .footer-center,
+  .footer-right {
+    justify-self: center;
+  }
+}

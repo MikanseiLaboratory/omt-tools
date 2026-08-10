@@ -1,0 +1,21 @@
+[package]
+name = "suite-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Shared settings, i18n, and version metadata for OMT Tools"
+
+[dependencies]
+anyhow.workspace = true
+directories.workspace = true
+egui = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[features]
+default = []
+## Optional egui CJK font helper (used by egui tools such as Studio Monitor).
+egui-fonts = ["dep:egui"]

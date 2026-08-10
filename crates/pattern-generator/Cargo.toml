@@ -1,0 +1,15 @@
+[package]
+name = "pattern-generator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SMPTE-style and utility test pattern generators for OMT Tools"
+
+[dependencies]
+image.workspace = true
+omt-media.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]

@@ -1,0 +1,7 @@
+# Sidecar binaries are produced by scripts/prepare-sidecars.(ps1|sh)
+# Tauri expects:
+#   omt-studio-monitor-<target-triple>[.exe]
+#   omt-test-patterns-<target-triple>[.exe]
+*
+!.gitignore
+!README.md

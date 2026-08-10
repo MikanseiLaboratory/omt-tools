@@ -1,0 +1,56 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/suite-core",
+    "crates/omt-media",
+    "crates/pattern-generator",
+    "crates/monitor-bench",
+    "crates/capture-spike",
+    "apps/studio-monitor",
+    "apps/test-patterns",
+    "apps/launcher/src-tauri",
+]
+default-members = [
+    "crates/suite-core",
+    "crates/omt-media",
+    "crates/pattern-generator",
+    "crates/monitor-bench",
+    "apps/studio-monitor",
+    "apps/test-patterns",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+authors = ["MikanseiLaboratory"]
+
+[workspace.dependencies]
+suite-core = { path = "crates/suite-core" }
+omt-media = { path = "crates/omt-media" }
+pattern-generator = { path = "crates/pattern-generator" }
+monitor-bench = { path = "crates/monitor-bench" }
+openmediatransport = { path = "../openmediatransport-rs", features = ["tokio"] }
+gpui = "0.2.2"
+vmx = { path = "../vmx-rs" }
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+directories = "6"
+eframe = "0.36"
+egui = "0.36"
+arc-swap = "1.7"
+parking_lot = "0.12"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+clap = { version = "4", features = ["derive"] }
+cpal = "0.18"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

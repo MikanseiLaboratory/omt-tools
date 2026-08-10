@@ -1,0 +1,83 @@
+name: 'Test Build'
+
+on:
+  push:
+    branches: [main, master, develop, feature/*]
+  pull_request:
+    branches: [main, master, develop]
+
+jobs:
+  test-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            rust_target: 'aarch64-apple-darwin'
+            args: '--target aarch64-apple-darwin'
+          - platform: 'macos-latest'
+            rust_target: 'x86_64-apple-darwin'
+            args: '--target x86_64-apple-darwin'
+          - platform: 'windows-latest'
+            rust_target: 'x86_64-pc-windows-msvc'
+            args: '--target x86_64-pc-windows-msvc --bundles msi,nsis'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.97'
+          targets: ${{ matrix.rust_target }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.2.19'
+
+      - name: Checkout sibling crates
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
+
+      - name: Build sidecar tools
+        run: cargo build --release --target ${{ matrix.rust_target }} -p omt-studio-monitor -p omt-test-patterns
+
+      - name: Prepare sidecars (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/prepare-sidecars.ps1 -Target ${{ matrix.rust_target }}
+
+      - name: Prepare sidecars (macOS)
+        if: runner.os == 'macOS'
+        run: bash ./scripts/prepare-sidecars.sh ${{ matrix.rust_target }}
+
+      - name: Install frontend dependencies
+        working-directory: apps/launcher
+        run: bun install --frozen-lockfile
+
+      - name: Set build environment variables
+        shell: bash
+        run: |
+          echo "GIT_COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "GIT_BRANCH=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          echo "BUILD_TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_ENV
+
+      - name: Test Build Tauri App
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GIT_COMMIT_HASH: ${{ env.GIT_COMMIT_HASH }}
+          GIT_BRANCH: ${{ env.GIT_BRANCH }}
+          BUILD_TIMESTAMP: ${{ env.BUILD_TIMESTAMP }}
+        with:
+          projectPath: './apps/launcher'
+          # Skip updater signing artifacts; release/pre-release workflows sign with secrets.
+          # Omit tagName so no GitHub Release is created. Use single-quoted JSON so
+          # the --config value is not mangled by shell/YAML escaping.
+          args: >-
+            ${{ matrix.args }}
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'
