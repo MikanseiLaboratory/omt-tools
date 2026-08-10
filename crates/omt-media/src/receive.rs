@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use openmediatransport::{
-    Codec, FrameType, OmtError, PreferredVideoFormat, Quality, ReceiveFlags, Receiver, Statistics,
+    FrameType, OmtError, Quality, ReceiverConfig, ReceiverSession, SessionStatistics,
 };
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use tokio::sync::mpsc;
 
 use crate::audio_out::{AudioLevels, AudioOutput};
@@ -46,8 +46,8 @@ pub struct VideoFrame {
     pub width: u32,
     /// Pixel height.
     pub height: u32,
-    /// BGRA8 tightly packed pixels.
-    pub bgra: Vec<u8>,
+    /// BGRA8 tightly packed pixels (shared ownership from the decoder).
+    pub bgra: Arc<[u8]>,
     /// OMT timestamp (100 ns ticks).
     pub timestamp: i64,
     /// Declared frame rate numerator.
@@ -81,12 +81,13 @@ pub struct ReceiveCounters {
 }
 
 /// Shared latest-frame slot + receive stats.
-#[derive(Debug, Default)]
 pub struct LatestVideo {
     /// Newest decoded frame (replaced, never queued).
     pub frame: Mutex<Option<VideoFrame>>,
+    /// Wakes prep/UI waiters when a frame is published or cleared.
+    frame_cv: Condvar,
     /// Last receiver statistics snapshot.
-    pub stats: Mutex<Statistics>,
+    pub stats: Mutex<SessionStatistics>,
     /// App-level counters.
     pub counters: Mutex<ReceiveCounters>,
     /// Latest audio peak levels for VU.
@@ -103,10 +104,63 @@ pub struct LatestVideo {
     pub url: Mutex<Option<String>>,
 }
 
+impl Default for LatestVideo {
+    fn default() -> Self {
+        Self {
+            frame: Mutex::new(None),
+            frame_cv: Condvar::new(),
+            stats: Mutex::new(SessionStatistics::default()),
+            counters: Mutex::new(ReceiveCounters::default()),
+            audio_levels: Mutex::new(AudioLevels::default()),
+            video_buffer_delay_ms: Mutex::new(0),
+            audio_buffer_delay_ms: Mutex::new(0),
+            metadata_log: Mutex::new(VecDeque::new()),
+            error: Mutex::new(None),
+            url: Mutex::new(None),
+        }
+    }
+}
+
+impl std::fmt::Debug for LatestVideo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LatestVideo").finish_non_exhaustive()
+    }
+}
+
 impl LatestVideo {
     /// Take the newest frame if present.
     pub fn take(&self) -> Option<VideoFrame> {
         self.frame.lock().take()
+    }
+
+    /// Wait up to `timeout` for a frame, then take it (latest-wins).
+    pub fn wait_take(&self, timeout: Duration) -> Option<VideoFrame> {
+        let mut slot = self.frame.lock();
+        if slot.is_none() {
+            let _ = self.frame_cv.wait_for(&mut slot, timeout);
+        }
+        slot.take()
+    }
+
+    /// Replace the latest video slot and wake waiters.
+    pub fn publish_video(&self, video: VideoFrame, replaced_extra: u64) {
+        let mut slot = self.frame.lock();
+        let mut counters = self.counters.lock();
+        if slot.is_some() {
+            counters.frames_replaced = counters.frames_replaced.saturating_add(1);
+        }
+        counters.frames_replaced = counters.frames_replaced.saturating_add(replaced_extra);
+        *slot = Some(video);
+        counters.frames_decoded = counters.frames_decoded.saturating_add(1);
+        drop(counters);
+        drop(slot);
+        self.frame_cv.notify_all();
+    }
+
+    /// Clear the frame slot and wake waiters (disconnect / teardown).
+    pub fn clear_video(&self) {
+        *self.frame.lock() = None;
+        self.frame_cv.notify_all();
     }
 
     /// Peek without removing.
@@ -138,7 +192,7 @@ pub enum ReceiveCommand {
     Shutdown,
 }
 
-/// Background Tokio task that owns an OMT [`Receiver`].
+/// Background Tokio task that owns an OMT [`ReceiverSession`].
 pub struct ReceiveWorker {
     tx: mpsc::UnboundedSender<ReceiveCommand>,
     latest: Arc<LatestVideo>,
@@ -268,7 +322,7 @@ async fn worker_loop(
     stall: Arc<Mutex<StallDetector>>,
     audio: Arc<AudioOutput>,
 ) {
-    let mut receiver: Option<Receiver> = None;
+    let mut receiver: Option<ReceiverSession> = None;
     let mut playout = Playout::default();
     publish_buffer_delays(&latest, &playout);
 
@@ -290,7 +344,7 @@ async fn worker_loop(
             }
         }
 
-        let Some(recv) = receiver.as_mut() else {
+        let Some(recv) = receiver.as_ref() else {
             match rx.recv().await {
                 Some(ReceiveCommand::Connect(opts)) => {
                     apply_connect(opts, &mut receiver, &latest, &stall, &audio, &mut playout)
@@ -308,67 +362,95 @@ async fn worker_loop(
             continue;
         };
 
-        let result = tokio::task::block_in_place(|| recv.receive(5));
-        match result {
-            Ok(Some(frame)) if frame.frame_type.contains(FrameType::VIDEO) => {
-                if let Some(meta) = frame.metadata.as_ref().filter(|s| !s.is_empty()) {
-                    push_log(&latest, "frame-meta", meta.clone());
-                }
-                let m = &frame.media;
-                let codec = Codec::from_i32(m.codec);
-                let expected = (m.width as usize) * 4 * (m.height as usize);
-                if codec == Some(Codec::Bgra) && frame.data.len() == expected && m.width > 0 {
-                    let video = VideoFrame {
-                        width: m.width as u32,
-                        height: m.height as u32,
-                        bgra: frame.data,
-                        timestamp: frame.timestamp,
-                        fps_n: m.frame_rate_n,
-                        fps_d: m.frame_rate_d.max(1),
-                    };
-                    stall.lock().on_frame(video.fps_n, video.fps_d);
-                    playout.push_video(video);
-                    *latest.stats.lock() = recv.statistics();
-                }
-            }
-            Ok(Some(frame)) if frame.frame_type.contains(FrameType::AUDIO) => {
-                let m = &frame.media;
-                playout.push_audio(
-                    frame.timestamp,
-                    frame.data,
-                    m.channels,
-                    m.samples_per_channel,
-                    m.sample_rate,
-                );
-                *latest.stats.lock() = recv.statistics();
-            }
-            Ok(Some(frame)) if frame.frame_type.contains(FrameType::METADATA) => {
-                let text = frame
-                    .metadata
-                    .clone()
-                    .or_else(|| String::from_utf8(frame.data.clone()).ok())
-                    .unwrap_or_else(|| format!("<binary metadata {} bytes>", frame.data.len()));
-                push_log(&latest, "metadata", text);
-                *latest.stats.lock() = recv.statistics();
-            }
-            Ok(Some(_)) => {
-                *latest.stats.lock() = recv.statistics();
-            }
-            Ok(None) => {
-                stall.lock().tick();
-            }
-            Err(e) => {
-                *latest.error.lock() = Some(e.to_string());
-                push_log(&latest, "error", e.to_string());
-                audio.clear();
-                playout.reset();
-                receiver = None;
-            }
+        // Wait briefly for video, then drain all ready A/V/metadata into playout.
+        let mut got_any = false;
+        if let Some(frame) =
+            tokio::task::block_in_place(|| recv.recv_video_timeout(Duration::from_millis(5)))
+        {
+            ingest_video(&latest, &stall, &mut playout, frame);
+            got_any = true;
+        }
+        while let Some(frame) = recv.try_recv_video() {
+            ingest_video(&latest, &stall, &mut playout, frame);
+            got_any = true;
+        }
+        while let Some(packet) = recv.try_recv_audio() {
+            playout.push_audio(
+                packet.timestamp,
+                Arc::clone(&packet.pcm_planar_f32),
+                packet.channels,
+                packet.samples_per_channel,
+                packet.sample_rate,
+            );
+            got_any = true;
+        }
+        while let Some(meta) = recv.try_recv_metadata() {
+            push_log(&latest, "metadata", meta.xml.to_string());
+            got_any = true;
         }
 
+        if !got_any {
+            stall.lock().tick();
+        }
+        *latest.stats.lock() = recv.statistics();
         playout.release(&latest, &audio);
         publish_buffer_delays(&latest, &playout);
     }
+}
+
+fn ingest_video(
+    latest: &LatestVideo,
+    stall: &Mutex<StallDetector>,
+    playout: &mut Playout,
+    frame: openmediatransport::DecodedVideoFrame,
+) {
+    if frame.width == 0 || frame.height == 0 {
+        return;
+    }
+    if let Some(meta) = frame.frame_metadata.as_ref().filter(|s| !s.is_empty()) {
+        push_log(latest, "frame-meta", meta.to_string());
+    }
+    let width = frame.width;
+    let height = frame.height;
+    let timestamp = frame.timestamp;
+    let fps_n = frame.frame_rate_n;
+    let fps_d = frame.frame_rate_d.max(1);
+    let bgra = take_bgra(frame);
+    let video = VideoFrame {
+        width,
+        height,
+        bgra,
+        timestamp,
+        fps_n,
+        fps_d,
+    };
+    stall.lock().on_frame(video.fps_n, video.fps_d);
+    playout.push_video(video);
+}
+
+fn take_bgra(frame: openmediatransport::DecodedVideoFrame) -> Arc<[u8]> {
+    let w = frame.width as usize;
+    let h = frame.height as usize;
+    let stride = frame.stride.max(1) as usize;
+    let row = w.saturating_mul(4);
+    if stride == row && frame.pixels.len() >= row.saturating_mul(h) {
+        if frame.pixels.len() == row * h {
+            return frame.pixels;
+        }
+        return Arc::from(&frame.pixels[..row * h]);
+    }
+    let mut out = Vec::with_capacity(row.saturating_mul(h));
+    for y in 0..h {
+        let start = y.saturating_mul(stride);
+        let end = start.saturating_add(row);
+        if end <= frame.pixels.len() {
+            out.extend_from_slice(&frame.pixels[start..end]);
+        } else {
+            out.resize(row.saturating_mul(h), 0);
+            break;
+        }
+    }
+    Arc::from(out.into_boxed_slice())
 }
 
 fn publish_buffer_delays(latest: &LatestVideo, playout: &Playout) {
@@ -378,7 +460,7 @@ fn publish_buffer_delays(latest: &LatestVideo, playout: &Playout) {
 
 async fn apply_connect(
     opts: ConnectOptions,
-    receiver: &mut Option<Receiver>,
+    receiver: &mut Option<ReceiverSession>,
     latest: &LatestVideo,
     stall: &Mutex<StallDetector>,
     audio: &AudioOutput,
@@ -392,11 +474,18 @@ async fn apply_connect(
     audio.clear();
     playout.reset();
     publish_buffer_delays(latest, playout);
+    if let Some(old) = receiver.take() {
+        old.disconnect();
+    }
     match open_receiver(opts).await {
         Ok(r) => {
             *receiver = Some(r);
             stall.lock().reset();
-            push_log(latest, "info", format!("connected {}", latest.url.lock().as_ref().unwrap()));
+            push_log(
+                latest,
+                "info",
+                format!("connected {}", latest.url.lock().as_ref().unwrap()),
+            );
         }
         Err(e) => {
             *receiver = None;
@@ -407,15 +496,17 @@ async fn apply_connect(
 }
 
 fn apply_disconnect(
-    receiver: &mut Option<Receiver>,
+    receiver: &mut Option<ReceiverSession>,
     latest: &LatestVideo,
     stall: &Mutex<StallDetector>,
     audio: &AudioOutput,
     playout: &mut Playout,
 ) {
-    *receiver = None;
+    if let Some(session) = receiver.take() {
+        session.disconnect();
+    }
     *latest.url.lock() = None;
-    *latest.frame.lock() = None;
+    latest.clear_video();
     *latest.audio_levels.lock() = AudioLevels::default();
     audio.clear();
     playout.reset();
@@ -423,24 +514,20 @@ fn apply_disconnect(
     push_log(latest, "info", "disconnected");
 }
 
-async fn open_receiver(opts: ConnectOptions) -> Result<Receiver, OmtError> {
+async fn open_receiver(opts: ConnectOptions) -> Result<ReceiverSession, OmtError> {
     let url = opts.url.clone();
     let quality = opts.quality;
-    let low_bandwidth = opts.low_bandwidth;
+    // Preview / low-bandwidth flags are not supported by ReceiverSession yet;
+    // quality is still forwarded via the subscribe metadata.
+    let _ = opts.low_bandwidth;
     tokio::task::spawn_blocking(move || {
-        let mut receiver = Receiver::create(
-            &url,
-            FrameType::VIDEO | FrameType::AUDIO | FrameType::METADATA,
-        )?;
-        receiver.set_preferred_format(PreferredVideoFormat::Bgra);
-        receiver.set_suggested_quality(quality);
-        receiver.set_flags(if low_bandwidth {
-            ReceiveFlags::PREVIEW
-        } else {
-            ReceiveFlags::NONE
-        });
-        receiver.connect(Some(Duration::from_secs(5)))?;
-        Ok(receiver)
+        let config = ReceiverConfig {
+            frame_types: FrameType::VIDEO | FrameType::AUDIO | FrameType::METADATA,
+            quality,
+            connect_timeout: Duration::from_secs(5),
+            auto_reconnect: true,
+        };
+        ReceiverSession::connect(url, config)
     })
     .await
     .map_err(|e| OmtError::Network(e.to_string()))?

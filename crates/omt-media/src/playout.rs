@@ -1,6 +1,10 @@
 //! PTS-based A/V playout with linked or independent delay buffers.
+//!
+//! Once audio is playing, the device playhead is the media clock master so
+//! video stays locked to PCM even when wall time and the DAC clock drift.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::audio_out::AudioOutput;
@@ -8,8 +12,12 @@ use crate::receive::{LatestVideo, VideoFrame};
 
 const TICKS_PER_SECOND: f64 = 10_000_000.0;
 const TICKS_PER_MS: i64 = 10_000;
-const VIDEO_Q_CAP: usize = 90;
-const AUDIO_Q_CAP: usize = 300;
+const VIDEO_Q_CAP: usize = 8;
+const AUDIO_Q_CAP: usize = 48;
+/// Soft resync when oldest queued PTS is this late vs the media clock.
+const RESNAP_MIN_LATE_MS: i64 = 1_500;
+/// Never hard-snap unless at least this late (prefer soft catch-up).
+const RESNAP_HARD_LATE_MS: i64 = 3_000;
 
 /// Whether buffer depth is measured in milliseconds or video frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -76,15 +84,15 @@ pub struct BufferSettings {
 
 impl Default for BufferSettings {
     fn default() -> Self {
-        // 3 frames @ 30 fps ≈ 100 ms — linked by default.
+        // 6 frames @ 30 fps ≈ 200 ms — linked by default (more jitter headroom).
         Self {
             linked: true,
             video: DelaySetting {
-                amount: 3,
+                amount: 6,
                 unit: BufferUnit::Frames,
             },
             audio: DelaySetting {
-                amount: 100,
+                amount: 200,
                 unit: BufferUnit::Milliseconds,
             },
         }
@@ -144,7 +152,7 @@ impl BufferSettings {
 
 struct PendingAudio {
     timestamp: i64,
-    data: Vec<u8>,
+    data: Arc<[u8]>,
     channels: i32,
     samples: i32,
     sample_rate: i32,
@@ -155,6 +163,8 @@ pub struct Playout {
     settings: BufferSettings,
     pts_origin: Option<i64>,
     wall_origin: Option<Instant>,
+    /// Soft correction applied on top of the wall clock (100 ns ticks).
+    clock_skew_ticks: i64,
     fps_n: i32,
     fps_d: i32,
     video_q: VecDeque<VideoFrame>,
@@ -167,6 +177,7 @@ impl Default for Playout {
             settings: BufferSettings::default(),
             pts_origin: None,
             wall_origin: None,
+            clock_skew_ticks: 0,
             fps_n: 30,
             fps_d: 1,
             video_q: VecDeque::new(),
@@ -195,6 +206,7 @@ impl Playout {
     pub fn reset(&mut self) {
         self.pts_origin = None;
         self.wall_origin = None;
+        self.clock_skew_ticks = 0;
         self.video_q.clear();
         self.audio_q.clear();
     }
@@ -220,7 +232,7 @@ impl Playout {
     pub fn push_audio(
         &mut self,
         timestamp: i64,
-        data: Vec<u8>,
+        data: Arc<[u8]>,
         channels: i32,
         samples: i32,
         sample_rate: i32,
@@ -240,10 +252,11 @@ impl Playout {
 
     /// Release packets whose PTS is due on the (possibly split) media clock.
     pub fn release(&mut self, latest: &LatestVideo, audio: &AudioOutput) {
-        let Some(audio_mt) = self.media_time(self.audio_delay_ms()) else {
-            return;
-        };
-        let Some(video_mt) = self.media_time(self.video_delay_ms()) else {
+        self.steer_clock_to_audio_ring(audio);
+
+        let audio_delay = self.audio_delay_ms();
+        let video_delay = self.video_delay_ms();
+        let Some((audio_mt, video_mt)) = self.gate_times(audio, audio_delay, video_delay) else {
             return;
         };
 
@@ -256,10 +269,11 @@ impl Playout {
                 break;
             };
             audio.push_planar_f32(
-                &packet.data,
+                packet.data.as_ref(),
                 packet.channels,
                 packet.samples,
                 packet.sample_rate,
+                packet.timestamp,
             );
             let levels = audio.levels();
             *latest.audio_levels.lock() = levels;
@@ -267,53 +281,109 @@ impl Playout {
             counters.audio_frames = levels.frames;
         }
 
-        let mut due: Option<VideoFrame> = None;
-        let mut replaced = 0u64;
-        while self
-            .video_q
-            .front()
-            .is_some_and(|f| f.timestamp <= video_mt)
-        {
-            if due.is_some() {
-                replaced += 1;
-            }
-            due = self.video_q.pop_front();
-        }
-        if let Some(video) = due {
-            {
-                let mut slot = latest.frame.lock();
-                let mut counters = latest.counters.lock();
-                if slot.is_some() {
-                    counters.frames_replaced = counters.frames_replaced.saturating_add(1);
-                }
-                counters.frames_replaced = counters.frames_replaced.saturating_add(replaced);
-                *slot = Some(video);
-                counters.frames_decoded = counters.frames_decoded.saturating_add(1);
-            }
+        self.release_video(latest, video_mt);
+
+        // If we are hopelessly behind, soft-catch or hard-snap.
+        self.maybe_resnap(audio);
+    }
+
+    fn release_video(&mut self, latest: &LatestVideo, video_mt: i64) {
+        let frame_ticks = self.frame_duration_ticks();
+        let late_thresh = video_mt.saturating_sub(frame_ticks.saturating_mul(2));
+
+        let Some(front) = self.video_q.front() else {
+            return;
+        };
+        if front.timestamp > video_mt {
+            return;
         }
 
-        // If we are hopelessly behind, snap the clock forward to the oldest queued PTS.
-        self.maybe_resnap();
+        let mut due: Option<VideoFrame> = None;
+        let mut replaced = 0u64;
+
+        if front.timestamp < late_thresh {
+            // Badly behind: keep the newest due frame only.
+            while self
+                .video_q
+                .front()
+                .is_some_and(|f| f.timestamp <= video_mt)
+            {
+                if due.is_some() {
+                    replaced += 1;
+                }
+                due = self.video_q.pop_front();
+            }
+        } else {
+            // On time / slightly late: release exactly one frame per tick so
+            // the display path is not force-coalesced into a stutter jump.
+            due = self.video_q.pop_front();
+        }
+
+        if let Some(video) = due {
+            latest.publish_video(video, replaced);
+        }
+    }
+
+    fn frame_duration_ticks(&self) -> i64 {
+        let fps = self.fps_n.max(1) as f64 / self.fps_d.max(1) as f64;
+        (TICKS_PER_SECOND / fps.max(1.0)).round() as i64
     }
 
     fn note_clock(&mut self, pts: i64) {
         if self.pts_origin.is_none() {
             self.pts_origin = Some(pts);
             self.wall_origin = Some(Instant::now());
+            self.clock_skew_ticks = 0;
         }
     }
 
-    fn media_time(&self, delay_ms: u32) -> Option<i64> {
+    fn media_time_wall(&self, delay_ms: u32) -> Option<i64> {
         let pts0 = self.pts_origin?;
         let wall0 = self.wall_origin?;
         let elapsed_ticks = (wall0.elapsed().as_secs_f64() * TICKS_PER_SECOND).round() as i64;
         let buffer_ticks = i64::from(delay_ms) * TICKS_PER_MS;
-        Some(pts0 + elapsed_ticks - buffer_ticks)
+        Some(pts0 + elapsed_ticks - buffer_ticks + self.clock_skew_ticks)
     }
 
-    fn maybe_resnap(&mut self) {
+    /// Wall-clock gates for releasing packets into the device ring / video slot.
+    ///
+    /// The DAC playhead is only used as a soft skew hint via
+    /// [`steer_clock_to_audio_ring`]; tying release deadlines directly to it
+    /// caused silent output when the playhead stalled or raced.
+    fn gate_times(
+        &self,
+        _audio: &AudioOutput,
+        audio_delay: u32,
+        video_delay: u32,
+    ) -> Option<(i64, i64)> {
+        Some((
+            self.media_time_wall(audio_delay)?,
+            self.media_time_wall(video_delay)?,
+        ))
+    }
+
+    /// Nudge wall skew so the audio ring stays near the configured delay depth.
+    fn steer_clock_to_audio_ring(&mut self, audio: &AudioOutput) {
+        if audio.playhead_pts().is_none() {
+            return;
+        }
+        let target_ms = (self.audio_delay_ms() as f64).max(40.0);
+        let actual_ms = audio.buffered_ms();
+        let err_ms = target_ms - actual_ms;
+        // Positive err → ring low → advance media time (release sooner).
+        // Cap per tick (~every few ms) so we slew instead of jumping.
+        let slew_ms = (err_ms * 0.12).clamp(-0.75, 0.75);
+        let delta = (slew_ms * TICKS_PER_MS as f64).round() as i64;
+        self.clock_skew_ticks = (self.clock_skew_ticks + delta)
+            .clamp(-50_000_000, 50_000_000); // ±5 s
+    }
+
+    fn maybe_resnap(&mut self, audio: &AudioOutput) {
         let delay = self.video_delay_ms().max(self.audio_delay_ms());
-        let Some(media_time) = self.media_time(delay) else {
+        let Some(media_time) = self
+            .gate_times(audio, self.audio_delay_ms(), self.video_delay_ms())
+            .map(|(a, v)| a.max(v))
+        else {
             return;
         };
         let oldest = match (self.video_q.front(), self.audio_q.front()) {
@@ -325,11 +395,31 @@ impl Playout {
         let Some(oldest) = oldest else {
             return;
         };
-        // More than 750 ms late relative to the playout clock → resync.
-        if oldest + 7_500_000 < media_time {
+
+        let late_ticks = media_time.saturating_sub(oldest);
+        let soft_thresh =
+            (i64::from(delay).saturating_mul(3).max(RESNAP_MIN_LATE_MS)) * TICKS_PER_MS;
+        let hard_thresh =
+            (i64::from(delay).saturating_mul(6).max(RESNAP_HARD_LATE_MS)) * TICKS_PER_MS;
+
+        if late_ticks < soft_thresh {
+            return;
+        }
+
+        if late_ticks >= hard_thresh {
+            // Hard snap only when hopelessly behind. Never clear the PCM ring here:
+            // VU meters from push peaks while clear() would wipe audible output and
+            // then underrun→resnap can death-spiral into permanent silence.
             self.pts_origin = Some(oldest);
             self.wall_origin = Some(Instant::now());
+            self.clock_skew_ticks = 0;
+            audio.invalidate_playhead();
+            return;
         }
+
+        // Soft catch-up: advance skew toward the backlog without resetting.
+        let catch_ms = ((late_ticks / TICKS_PER_MS) as f64 * 0.08).clamp(1.0, 8.0);
+        self.clock_skew_ticks += (catch_ms * TICKS_PER_MS as f64).round() as i64;
     }
 }
 
@@ -387,10 +477,10 @@ mod tests {
     }
 
     #[test]
-    fn default_buffer_is_linked_100ms() {
+    fn default_buffer_is_linked_200ms() {
         let s = BufferSettings::default();
         assert!(s.linked);
-        assert_eq!(s.video_delay_ms(30, 1), 100);
-        assert_eq!(s.audio_delay_ms(30, 1), 100);
+        assert_eq!(s.video_delay_ms(30, 1), 200);
+        assert_eq!(s.audio_delay_ms(30, 1), 200);
     }
 }

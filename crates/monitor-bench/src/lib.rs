@@ -114,7 +114,7 @@ pub fn run_headless(opts: BenchOptions) -> Result<BenchReport> {
             last_frame_at = Some(arrived);
 
             let t0 = Instant::now();
-            present_frame(opts.backend, &frame.bgra, &mut rgba_scratch);
+            present_frame(opts.backend, frame.bgra.as_ref(), &mut rgba_scratch);
             present_us_acc += t0.elapsed().as_micros() as u64;
             last_rgba_bytes = rgba_scratch.len();
             width = frame.width;
