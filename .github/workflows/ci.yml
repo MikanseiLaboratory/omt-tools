@@ -20,9 +20,8 @@ jobs:
       - name: Checkout sibling crates
         shell: bash
         run: |
-          # Preview / ReceiverSession land via open PRs; pin matching branches until merged.
-          git clone --depth 1 --branch feat/sender-connection-counts https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
-          git clone --depth 1 --branch perf/1080p59-receive-optimize https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
       - run: cargo fmt --all -- --check
 
   clippy-test:
@@ -40,9 +39,8 @@ jobs:
       - name: Checkout sibling crates
         shell: bash
         run: |
-          # Preview / ReceiverSession land via open PRs; pin matching branches until merged.
-          git clone --depth 1 --branch feat/sender-connection-counts https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
-          git clone --depth 1 --branch perf/1080p59-receive-optimize https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
       - name: Clippy (workspace libs/tools)
         run: cargo clippy -p suite-core -p omt-media -p pattern-generator -p monitor-bench -p capture-spike -p omt-studio-monitor -p omt-test-patterns --all-targets -- -D warnings
       - name: Test
@@ -69,9 +67,8 @@ jobs:
       - name: Checkout sibling crates
         shell: bash
         run: |
-          # Preview / ReceiverSession land via open PRs; pin matching branches until merged.
-          git clone --depth 1 --branch feat/sender-connection-counts https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
-          git clone --depth 1 --branch perf/1080p59-receive-optimize https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
       - name: Build release tools
         run: cargo build --release --target ${{ matrix.target }} -p omt-studio-monitor -p omt-test-patterns -p capture-spike
       - name: Upload tool artifacts
@@ -95,9 +92,8 @@ jobs:
       - name: Checkout sibling crates
         shell: bash
         run: |
-          # Preview / ReceiverSession land via open PRs; pin matching branches until merged.
-          git clone --depth 1 --branch feat/sender-connection-counts https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
-          git clone --depth 1 --branch perf/1080p59-receive-optimize https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git "${GITHUB_WORKSPACE}/../openmediatransport-rs"
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git "${GITHUB_WORKSPACE}/../vmx-rs"
       - name: Build Windows Arm64 tools
         run: cargo build --release --target aarch64-pc-windows-msvc -p omt-studio-monitor -p omt-test-patterns -p capture-spike
       - name: Upload tool artifacts
@@ -139,8 +135,8 @@ jobs:
       - name: Checkout sibling crates
         shell: bash
         run: |
-          git clone --depth 1 --branch feat/sender-connection-counts https://github.com/MikanseiLaboratory/openmediatransport-rs.git ../openmediatransport-rs
-          git clone --depth 1 --branch perf/1080p59-receive-optimize https://github.com/MikanseiLaboratory/vmx-rs.git ../vmx-rs
+          git clone --depth 1 https://github.com/MikanseiLaboratory/openmediatransport-rs.git ../openmediatransport-rs
+          git clone --depth 1 https://github.com/MikanseiLaboratory/vmx-rs.git ../vmx-rs
       - name: Ensure sidecar placeholders
         shell: pwsh
         run: ./scripts/ensure-sidecar-placeholders.ps1
