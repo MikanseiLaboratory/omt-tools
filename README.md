@@ -7,7 +7,7 @@ Open Media Transport production utilities inspired by NDI Tools.
 | Tool | Status | Description |
 |------|--------|-------------|
 | **Launcher** (Tauri) | MVP | Starts bundled tools, language/theme settings, suite version |
-| **Studio Monitor** (GPUI) | MVP | Discover and view OMT sources on the LAN |
+| **Studio Monitor** (egui/eframe) | MVP | Discover and view OMT sources on the LAN |
 | **Test Patterns** (GPUI) | MVP | Send SMPTE-style patterns + tone over OMT |
 | **Screen Capture** | Spike | Windows Graphics Capture / ScreenCaptureKit probe |
 
@@ -16,7 +16,7 @@ Open Media Transport production utilities inspired by NDI Tools.
 ```text
 omt-tools/
   apps/launcher/             Tauri launcher (frontend + src-tauri)
-  apps/studio-monitor/       GPUI viewer
+  apps/studio-monitor/       egui/eframe viewer
   apps/test-patterns/        GPUI sender
   crates/suite-core/         settings, i18n, versions
   crates/omt-media/          discovery / receive / send helpers

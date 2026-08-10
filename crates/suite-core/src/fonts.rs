@@ -1,74 +1,153 @@
-//! System CJK font loading helpers for egui tools.
+//! System Japanese UI font loading helpers for egui tools.
 
 use std::path::Path;
 
-/// Load bytes for a system CJK UI font suitable for Japanese (and other CJK) glyphs.
+#[derive(Clone, Copy)]
+struct FontCandidate {
+    path: &'static Path,
+    /// Face index inside a TTC (use proportional / UI faces when available).
+    index: u32,
+}
+
+/// Load bytes + face index for a modern Japanese UI font.
 ///
-/// Returns `None` when no candidate font file is readable.
-pub fn load_cjk_font_bytes() -> Option<Vec<u8>> {
-    for path in cjk_font_candidates() {
-        if let Ok(bytes) = std::fs::read(path) {
+/// Prefers business / UI gothic faces (BIZ UDPGothic, Yu Gothic) and never
+/// falls back to Chinese-primary fonts (e.g. Microsoft YaHei / pan-CJK CJK).
+pub fn load_cjk_font() -> Option<(Vec<u8>, u32)> {
+    for cand in japanese_ui_font_candidates() {
+        if let Ok(bytes) = std::fs::read(cand.path) {
             if !bytes.is_empty() {
-                return Some(bytes);
+                return Some((bytes, cand.index));
             }
         }
     }
     None
 }
 
-/// Install a CJK fallback into the egui font stack (Latin defaults stay primary).
+/// Load bytes for a system Japanese UI font.
+pub fn load_cjk_font_bytes() -> Option<Vec<u8>> {
+    load_cjk_font().map(|(bytes, _)| bytes)
+}
+
+/// Install a simple modern Japanese UI font as the primary proportional face,
+/// with Segoe UI as Latin companion when present.
 #[cfg(feature = "egui-fonts")]
 pub fn install_egui_cjk_fonts(ctx: &egui::Context) {
     use std::sync::Arc;
 
-    let Some(bytes) = load_cjk_font_bytes() else {
-        return;
-    };
-
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "omt_cjk".into(),
-        Arc::new(egui::FontData::from_owned(bytes)),
-    );
+
+    // Latin: Segoe UI (clean modern Windows UI).
+    if let Ok(bytes) = std::fs::read(r"C:\Windows\Fonts\segoeui.ttf") {
+        if !bytes.is_empty() {
+            fonts.font_data.insert(
+                "omt_latin".into(),
+                Arc::new(egui::FontData::from_owned(bytes)),
+            );
+        }
+    }
+
+    if let Some((bytes, index)) = load_cjk_font() {
+        let mut data = egui::FontData::from_owned(bytes);
+        data.index = index;
+        data = data.tweak(egui::FontTweak {
+            scale: 1.0,
+            y_offset_factor: 0.0,
+            y_offset: 0.0,
+        });
+        fonts.font_data.insert("omt_jp".into(), Arc::new(data));
+    }
+
     if let Some(proportional) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-        proportional.push("omt_cjk".into());
+        // JP first so kana/kanji use the business gothic; Latin falls through to Segoe / egui.
+        if fonts.font_data.contains_key("omt_jp") {
+            proportional.insert(0, "omt_jp".into());
+        }
+        if fonts.font_data.contains_key("omt_latin") {
+            let insert_at = if fonts.font_data.contains_key("omt_jp") {
+                1
+            } else {
+                0
+            };
+            proportional.insert(insert_at, "omt_latin".into());
+        }
     }
     if let Some(monospace) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-        monospace.push("omt_cjk".into());
+        if fonts.font_data.contains_key("omt_jp") {
+            monospace.push("omt_jp".into());
+        }
     }
+
     ctx.set_fonts(fonts);
 }
 
-fn cjk_font_candidates() -> Vec<&'static Path> {
+fn japanese_ui_font_candidates() -> Vec<FontCandidate> {
     #[cfg(windows)]
     {
         [
-            Path::new(r"C:\Windows\Fonts\YuGothM.ttc"),
-            Path::new(r"C:\Windows\Fonts\YuGothR.ttc"),
-            Path::new(r"C:\Windows\Fonts\meiryo.ttc"),
-            Path::new(r"C:\Windows\Fonts\msgothic.ttc"),
-            Path::new(r"C:\Windows\Fonts\msyh.ttc"),
+            // BIZ UDPGothic = proportional business UD gothic (index 1 in the Regular TTC).
+            FontCandidate {
+                path: Path::new(r"C:\Windows\Fonts\BIZ-UDGothicR.ttc"),
+                index: 1,
+            },
+            FontCandidate {
+                path: Path::new(r"C:\Windows\Fonts\BIZ-UDGothicR.ttc"),
+                index: 0,
+            },
+            // Yu Gothic Regular / Medium — clean modern JP sans.
+            FontCandidate {
+                path: Path::new(r"C:\Windows\Fonts\YuGothR.ttc"),
+                index: 0,
+            },
+            FontCandidate {
+                path: Path::new(r"C:\Windows\Fonts\YuGothM.ttc"),
+                index: 0,
+            },
+            FontCandidate {
+                path: Path::new(r"C:\Windows\Fonts\meiryo.ttc"),
+                index: 0,
+            },
+            // JP-only Noto (not pan-CJK).
+            FontCandidate {
+                path: Path::new(r"C:\Windows\Fonts\NotoSansJP-VF.ttf"),
+                index: 0,
+            },
         ]
         .to_vec()
     }
     #[cfg(target_os = "macos")]
     {
         [
-            Path::new("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"),
-            Path::new("/System/Library/Fonts/Hiragino Sans GB.ttc"),
-            Path::new("/Library/Fonts/Arial Unicode.ttf"),
-            Path::new("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
-            Path::new("/System/Library/Fonts/AppleSDGothicNeo.ttc"),
+            FontCandidate {
+                path: Path::new("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"),
+                index: 0,
+            },
+            FontCandidate {
+                path: Path::new("/System/Library/Fonts/Hiragino Sans W3.ttc"),
+                index: 0,
+            },
+            FontCandidate {
+                path: Path::new("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+                index: 0,
+            },
         ]
         .to_vec()
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         [
-            Path::new("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
-            Path::new("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"),
-            Path::new("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
-            Path::new("/usr/share/fonts/truetype/fonts-japanese-gothic.ttf"),
+            FontCandidate {
+                path: Path::new("/usr/share/fonts/opentype/noto/NotoSansJP-Regular.otf"),
+                index: 0,
+            },
+            FontCandidate {
+                path: Path::new("/usr/share/fonts/truetype/fonts-japanese-gothic.ttf"),
+                index: 0,
+            },
+            FontCandidate {
+                path: Path::new("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+                index: 0,
+            },
         ]
         .to_vec()
     }

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, bail};
 use clap::ValueEnum;
 use omt_media::{ReceiveWorker, StallState};
-use openmediatransport::bgra_to_rgba;
+use openmediatransport::bgra_to_rgba_into;
 use serde::Serialize;
 
 /// Present-path backend under test.
@@ -174,8 +174,11 @@ pub fn run_headless(opts: BenchOptions) -> Result<BenchReport> {
 }
 
 fn present_frame(backend: BenchBackend, bgra: &[u8], rgba: &mut Vec<u8>) {
-    // Shared convert step — UI toolkits ultimately need RGBA/texture-friendly pixels.
-    *rgba = bgra_to_rgba(bgra);
+    // Reuse the staging buffer so the SSSE3 BGRA→RGBA path stays allocation-free.
+    if rgba.len() != bgra.len() {
+        rgba.resize(bgra.len(), 0);
+    }
+    bgra_to_rgba_into(bgra, rgba);
     match backend {
         BenchBackend::Null => {}
         BenchBackend::Gpui => {

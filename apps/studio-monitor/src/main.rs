@@ -1,22 +1,15 @@
-//! OMT Studio Monitor (GPUI).
-//!
-//! Headless performance run:
-//! ```text
-//! cargo run --release -p omt-studio-monitor -- --headless --url omt://... --seconds 10
-//! ```
+//! OMT Studio Monitor (egui/eframe).
 
 // Hide the console window for release GUI launches on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app;
 mod chrome;
-mod menu;
+mod frame_prep;
 mod preferences;
-mod ui;
-
-use std::time::Duration;
+mod settings;
 
 use clap::Parser;
-use monitor_bench::{BenchBackend, BenchOptions, print_report, run_headless};
 use suite_core::{LaunchOverrides, t};
 
 #[derive(Debug, Parser)]
@@ -31,18 +24,6 @@ struct Args {
     /// Optional initial `omt://` URL.
     #[arg(long)]
     url: Option<String>,
-    /// Run without opening a window (performance harness).
-    #[arg(long, default_value_t = false)]
-    headless: bool,
-    /// Headless duration in seconds after the first frame.
-    #[arg(long, default_value_t = 10)]
-    seconds: u64,
-    /// Seconds to wait for the first video frame in headless mode.
-    #[arg(long, default_value_t = 15)]
-    connect_timeout: u64,
-    /// Allow zero frames (CI dry-run).
-    #[arg(long, default_value_t = false)]
-    allow_zero_frames: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -57,22 +38,6 @@ fn main() -> anyhow::Result<()> {
         None,
     );
 
-    if args.headless {
-        let url = args
-            .url
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("--headless requires --url omt://..."))?;
-        let report = run_headless(BenchOptions {
-            backend: BenchBackend::Gpui,
-            url,
-            duration: Duration::from_secs(args.seconds),
-            connect_timeout: Duration::from_secs(args.connect_timeout),
-            allow_zero_frames: args.allow_zero_frames,
-        })?;
-        print_report(&report);
-        return Ok(());
-    }
-
     let title = t(overrides.language, "tool.studio_monitor").to_string();
-    ui::run_gpui(title, overrides.language, overrides.theme, args.url)
+    app::run_eframe(title, overrides.language, overrides.theme, args.url)
 }

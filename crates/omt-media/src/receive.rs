@@ -5,7 +5,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use openmediatransport::{
-    FrameType, OmtError, Quality, ReceiverConfig, ReceiverSession, SessionStatistics,
+    FrameType, OmtError, Quality, ReceiverConfig, ReceiverSession, SessionState,
+    SessionStatistics,
 };
 use parking_lot::{Condvar, Mutex};
 use tokio::sync::mpsc;
@@ -22,10 +23,11 @@ const METADATA_LOG_CAP: usize = 256;
 pub struct ConnectOptions {
     /// Source URL (`omt://…`).
     pub url: String,
-    /// Suggested encode quality sent to the peer.
+    /// Suggested encode quality sent to the peer via subscribe metadata.
+    ///
+    /// Preview / compressed-only receive flags are not supported by
+    /// [`ReceiverSession`]; quality is the only request that reaches the sender.
     pub quality: Quality,
-    /// Request preview / low-bandwidth path when true.
-    pub low_bandwidth: bool,
 }
 
 impl ConnectOptions {
@@ -34,7 +36,6 @@ impl ConnectOptions {
         Self {
             url: url.into(),
             quality: Quality::Default,
-            low_bandwidth: false,
         }
     }
 }
@@ -88,6 +89,8 @@ pub struct LatestVideo {
     frame_cv: Condvar,
     /// Last receiver statistics snapshot.
     pub stats: Mutex<SessionStatistics>,
+    /// Latest [`ReceiverSession`] transport state.
+    pub session_state: Mutex<SessionState>,
     /// App-level counters.
     pub counters: Mutex<ReceiveCounters>,
     /// Latest audio peak levels for VU.
@@ -110,6 +113,7 @@ impl Default for LatestVideo {
             frame: Mutex::new(None),
             frame_cv: Condvar::new(),
             stats: Mutex::new(SessionStatistics::default()),
+            session_state: Mutex::new(SessionState::Stopped),
             counters: Mutex::new(ReceiveCounters::default()),
             audio_levels: Mutex::new(AudioLevels::default()),
             video_buffer_delay_ms: Mutex::new(0),
@@ -267,7 +271,7 @@ impl ReceiveWorker {
             .send(ReceiveCommand::Connect(ConnectOptions::new(url)));
     }
 
-    /// Connect with explicit quality / bandwidth options.
+    /// Connect with explicit quality options.
     pub fn connect_with(&self, options: ConnectOptions) {
         let _ = self.tx.send(ReceiveCommand::Connect(options));
     }
@@ -393,6 +397,15 @@ async fn worker_loop(
             stall.lock().tick();
         }
         *latest.stats.lock() = recv.statistics();
+        let state = recv.state();
+        let prev = *latest.session_state.lock();
+        *latest.session_state.lock() = state;
+        if state != prev {
+            push_log(latest.as_ref(), "session", format!("{state:?}"));
+        }
+        if let Some(err) = recv.last_error() {
+            *latest.error.lock() = Some(err);
+        }
         playout.release(&latest, &audio);
         publish_buffer_delays(&latest, &playout);
     }
@@ -477,8 +490,10 @@ async fn apply_connect(
     if let Some(old) = receiver.take() {
         old.disconnect();
     }
+    *latest.session_state.lock() = SessionState::Connecting;
     match open_receiver(opts).await {
         Ok(r) => {
+            *latest.session_state.lock() = r.state();
             *receiver = Some(r);
             stall.lock().reset();
             push_log(
@@ -489,6 +504,7 @@ async fn apply_connect(
         }
         Err(e) => {
             *receiver = None;
+            *latest.session_state.lock() = SessionState::Stopped;
             *latest.error.lock() = Some(e.to_string());
             push_log(latest, "error", e.to_string());
         }
@@ -506,6 +522,8 @@ fn apply_disconnect(
         session.disconnect();
     }
     *latest.url.lock() = None;
+    *latest.session_state.lock() = SessionState::Stopped;
+    *latest.stats.lock() = SessionStatistics::default();
     latest.clear_video();
     *latest.audio_levels.lock() = AudioLevels::default();
     audio.clear();
@@ -517,9 +535,6 @@ fn apply_disconnect(
 async fn open_receiver(opts: ConnectOptions) -> Result<ReceiverSession, OmtError> {
     let url = opts.url.clone();
     let quality = opts.quality;
-    // Preview / low-bandwidth flags are not supported by ReceiverSession yet;
-    // quality is still forwarded via the subscribe metadata.
-    let _ = opts.low_bandwidth;
     tokio::task::spawn_blocking(move || {
         let config = ReceiverConfig {
             frame_types: FrameType::VIDEO | FrameType::AUDIO | FrameType::METADATA,

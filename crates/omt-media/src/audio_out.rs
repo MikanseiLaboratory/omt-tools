@@ -1,7 +1,7 @@
 //! System audio playback for received OMT PCM (cpal).
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 use std::thread;
@@ -12,6 +12,7 @@ use parking_lot::Mutex;
 use tracing::warn;
 
 const RING_CAP_SAMPLES: usize = 48_000 * 2 * 2; // ~2s stereo @ 48 kHz
+const TICKS_PER_SECOND: i64 = 10_000_000;
 
 /// Peak levels for VU display (linear 0..1, per channel).
 #[derive(Debug, Clone, Copy, Default)]
@@ -67,15 +68,32 @@ struct DeviceGeometry {
     rate: u32,
 }
 
+/// One queued PCM run with stream timeline metadata (device frames).
+struct PtsRun {
+    /// PTS of the first device frame in this run.
+    pts_start: i64,
+    /// Stream duration of this run in 100 ns ticks.
+    pts_duration: i64,
+    /// Device frames remaining in this run.
+    frames_total: usize,
+    /// Device frames already consumed from this run.
+    frames_consumed: usize,
+}
+
 struct Shared {
     /// Interleaved f32 ring (device channel count).
     ring: Mutex<VecDeque<f32>>,
+    /// Parallel PTS timeline for samples in `ring` (same order).
+    pts_runs: Mutex<VecDeque<PtsRun>>,
     levels: Mutex<AudioLevels>,
     /// Playback boost in dB (applied when pushing).
     boost_db: AtomicI32,
     geometry: Mutex<DeviceGeometry>,
     /// `None` = system default output.
     device_name: Mutex<Option<String>>,
+    /// PTS currently being output (valid when `playhead_valid`).
+    playhead_pts: AtomicI64,
+    playhead_valid: AtomicBool,
 }
 
 enum AudioCmd {
@@ -103,6 +121,7 @@ impl AudioOutput {
     pub fn new() -> Self {
         let shared = Arc::new(Shared {
             ring: Mutex::new(VecDeque::with_capacity(RING_CAP_SAMPLES.min(8192))),
+            pts_runs: Mutex::new(VecDeque::new()),
             levels: Mutex::new(AudioLevels::default()),
             boost_db: AtomicI32::new(0),
             geometry: Mutex::new(DeviceGeometry {
@@ -110,6 +129,8 @@ impl AudioOutput {
                 rate: 48_000,
             }),
             device_name: Mutex::new(None),
+            playhead_pts: AtomicI64::new(0),
+            playhead_valid: AtomicBool::new(false),
         });
 
         let (cmd_tx, cmd_rx) = mpsc::channel();
@@ -159,14 +180,56 @@ impl AudioOutput {
         self.shared.boost_db.store(db, Ordering::Relaxed);
     }
 
+    /// PTS of the sample currently being played, if the timeline is active.
+    pub fn playhead_pts(&self) -> Option<i64> {
+        if self.shared.playhead_valid.load(Ordering::Acquire) {
+            Some(self.shared.playhead_pts.load(Ordering::Acquire))
+        } else {
+            None
+        }
+    }
+
+    /// Buffered audio duration currently sitting in the device ring (milliseconds).
+    pub fn buffered_ms(&self) -> f64 {
+        let (ch, rate) = {
+            let geo = self.shared.geometry.lock();
+            (geo.channels.max(1), geo.rate.max(1) as f64)
+        };
+        let samples = self.shared.ring.lock().len();
+        let frames = samples / ch;
+        (frames as f64) * 1000.0 / rate
+    }
+
+    /// Device output sample rate currently configured.
+    pub fn device_sample_rate(&self) -> u32 {
+        self.shared.geometry.lock().rate.max(1)
+    }
+
     /// Clear the ring buffer (on disconnect / source change).
     pub fn clear(&self) {
         self.shared.ring.lock().clear();
+        self.shared.pts_runs.lock().clear();
         *self.shared.levels.lock() = AudioLevels::default();
+        self.invalidate_playhead();
+    }
+
+    /// Drop the media-clock playhead without touching buffered PCM.
+    pub fn invalidate_playhead(&self) {
+        self.shared.playhead_valid.store(false, Ordering::Release);
+        self.shared.playhead_pts.store(0, Ordering::Release);
     }
 
     /// Push planar f32 PCM (`ch0[samples]…chN[samples]` tightly packed as LE bytes).
-    pub fn push_planar_f32(&self, data: &[u8], channels: i32, samples: i32, sample_rate: i32) {
+    ///
+    /// `timestamp` is the OMT PTS (100 ns ticks) of the first sample in the packet.
+    pub fn push_planar_f32(
+        &self,
+        data: &[u8],
+        channels: i32,
+        samples: i32,
+        sample_rate: i32,
+        timestamp: i64,
+    ) {
         let ch = channels.max(1) as usize;
         let n = samples.max(0) as usize;
         let expected = ch * n * 4;
@@ -219,8 +282,15 @@ impl AudioOutput {
         } else {
             ((n as u64 * dst_rate as u64) / src_rate as u64).max(1) as usize
         };
+        let pts_duration = (n as i64)
+            .saturating_mul(TICKS_PER_SECOND)
+            .saturating_div(i64::from(sample_rate.max(1)));
 
         let mut ring = self.shared.ring.lock();
+        let mut pts_runs = self.shared.pts_runs.lock();
+
+        // Drop oldest samples + matching timeline when the ring overflows.
+        let mut dropped_frames = 0usize;
         for i in 0..out_n {
             let src_i = if out_n == n {
                 i
@@ -237,8 +307,27 @@ impl AudioOutput {
                 };
                 if ring.len() >= RING_CAP_SAMPLES {
                     ring.pop_front();
+                    if c == 0 {
+                        dropped_frames += 1;
+                    }
                 }
                 ring.push_back(sample);
+            }
+        }
+        for _ in 0..dropped_frames {
+            consume_pts_frames(&mut pts_runs, 1, &self.shared);
+        }
+
+        if out_n > 0 {
+            pts_runs.push_back(PtsRun {
+                pts_start: timestamp,
+                pts_duration: pts_duration.max(1),
+                frames_total: out_n,
+                frames_consumed: 0,
+            });
+            if !self.shared.playhead_valid.load(Ordering::Acquire) {
+                self.shared.playhead_pts.store(timestamp, Ordering::Release);
+                self.shared.playhead_valid.store(true, Ordering::Release);
             }
         }
     }
@@ -249,6 +338,31 @@ impl Drop for AudioOutput {
         if let Some(tx) = self.cmd_tx.lock().take() {
             let _ = tx.send(AudioCmd::Shutdown);
         }
+    }
+}
+
+fn consume_pts_frames(runs: &mut VecDeque<PtsRun>, mut frames: usize, shared: &Shared) {
+    while frames > 0 {
+        let Some(run) = runs.front_mut() else {
+            break;
+        };
+        let left = run.frames_total.saturating_sub(run.frames_consumed);
+        if left == 0 {
+            runs.pop_front();
+            continue;
+        }
+        let take = frames.min(left);
+        run.frames_consumed += take;
+        let progressed = run.frames_consumed as i64;
+        let total = run.frames_total.max(1) as i64;
+        let pts = run.pts_start
+            + (run.pts_duration.saturating_mul(progressed) / total);
+        shared.playhead_pts.store(pts, Ordering::Release);
+        shared.playhead_valid.store(true, Ordering::Release);
+        if run.frames_consumed >= run.frames_total {
+            runs.pop_front();
+        }
+        frames -= take;
     }
 }
 
@@ -315,6 +429,8 @@ fn run_output_thread(
             geo.rate = config.sample_rate.0;
         }
         shared.ring.lock().clear();
+        shared.pts_runs.lock().clear();
+        shared.playhead_valid.store(false, Ordering::Release);
 
         let shared_cb = Arc::clone(&shared);
         let stream = match sample_format {
@@ -373,14 +489,30 @@ fn build_stream<T>(
 where
     T: cpal::Sample + cpal::SizedSample + cpal::FromSample<f32>,
 {
+    let channels = config.channels.max(1) as usize;
     device
         .build_output_stream(
             config,
             move |data: &mut [T], _| {
                 let mut ring = shared.ring.lock();
+                let mut got = 0usize;
                 for sample in data.iter_mut() {
-                    let v = ring.pop_front().unwrap_or(0.0);
-                    *sample = T::from_sample(v);
+                    match ring.pop_front() {
+                        Some(v) => {
+                            *sample = T::from_sample(v);
+                            got += 1;
+                        }
+                        None => {
+                            *sample = T::from_sample(0.0);
+                        }
+                    }
+                }
+                drop(ring);
+
+                let frames_from_ring = got / channels;
+                if frames_from_ring > 0 {
+                    let mut runs = shared.pts_runs.lock();
+                    consume_pts_frames(&mut runs, frames_from_ring, &shared);
                 }
             },
             |err| warn!("audio stream error: {err}"),
