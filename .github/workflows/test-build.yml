@@ -75,6 +75,7 @@ jobs:
           BUILD_TIMESTAMP: ${{ env.BUILD_TIMESTAMP }}
         with:
           projectPath: './apps/launcher'
-          args: ${{ matrix.args }}
+          # Skip updater signing artifacts; release/pre-release workflows sign with secrets.
+          args: ${{ matrix.args }} --config "{\"bundle\":{\"createUpdaterArtifacts\":false}}"
           # Don't create releases for test builds
           includeRelease: false
