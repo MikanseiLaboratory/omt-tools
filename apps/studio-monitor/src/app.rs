@@ -985,6 +985,7 @@ impl MonitorApp {
                 ui.add_space(10.0);
 
                 egui::ScrollArea::vertical()
+                    .id_salt("monitor_sources")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let none_sel = self.selected.is_none();
@@ -1106,138 +1107,140 @@ impl MonitorApp {
             .inner_margin(egui::Margin::symmetric(16, 14))
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 10.0;
-                    let source_fps = if self.fps_d > 0 {
-                        self.fps_n as f32 / self.fps_d as f32
-                    } else {
-                        0.0
-                    };
-                    let buffer_label = format_buffer_stats(
-                        self.language,
-                        &self.settings.buffer,
-                        self.video_buffer_delay_ms,
-                        self.audio_buffer_delay_ms,
-                        self.buffer_fps().0,
-                        self.buffer_fps().1,
-                    );
+                egui::ScrollArea::vertical()
+                    .id_salt("monitor_stats")
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 10.0;
+                        let source_fps = if self.fps_d > 0 {
+                            self.fps_n as f32 / self.fps_d as f32
+                        } else {
+                            0.0
+                        };
+                        let buffer_label = format_buffer_stats(
+                            self.language,
+                            &self.settings.buffer,
+                            self.video_buffer_delay_ms,
+                            self.audio_buffer_delay_ms,
+                            self.buffer_fps().0,
+                            self.buffer_fps().1,
+                        );
 
-                    ui.label(
-                        RichText::new(t(self.language, "monitor.stats"))
-                            .strong()
-                            .color(chrome.text),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Display FPS",
-                        format!("{:.1}", self.display_fps),
-                    );
-                    stat_row(ui, chrome, "Source FPS", format!("{source_fps:.2}"));
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Presented",
-                        format!("{}", self.frames_presented),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Source dropped",
-                        format!("{}", self.source_dropped),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Render skipped",
-                        format!("{}", self.frames_render_skipped),
-                    );
-                    stat_row(ui, chrome, "Net dropped", format!("{}", self.net_dropped));
-                    stat_row(ui, chrome, "Decoded", format!("{}", self.frames_decoded));
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Decode ms",
-                        format!(
-                            "{:.2} (peak {:.2})",
-                            self.decode_ms_avg, self.decode_ms_peak
-                        ),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Wire queue",
-                        format!("{}", self.wire_queue_depth),
-                    );
-                    stat_row(ui, chrome, "Reconnects", format!("{}", self.reconnects));
-                    stat_row(ui, chrome, "Session", format!("{:?}", self.session_state));
-
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(t(self.language, "monitor.audio"))
-                            .strong()
-                            .color(chrome.text),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Audio packets",
-                        format!("{}", self.audio_frames),
-                    );
-                    stat_row(ui, chrome, "L", format_dbfs(self.audio_levels.peak_l));
-                    stat_row(ui, chrome, "R", format_dbfs(self.audio_levels.peak_r));
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Format",
-                        if self.audio_levels.sample_rate > 0 {
+                        ui.label(
+                            RichText::new(t(self.language, "monitor.stats"))
+                                .strong()
+                                .color(chrome.text),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Display FPS",
+                            format!("{:.1}", self.display_fps),
+                        );
+                        stat_row(ui, chrome, "Source FPS", format!("{source_fps:.2}"));
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Presented",
+                            format!("{}", self.frames_presented),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Source dropped",
+                            format!("{}", self.source_dropped),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Render skipped",
+                            format!("{}", self.frames_render_skipped),
+                        );
+                        stat_row(ui, chrome, "Net dropped", format!("{}", self.net_dropped));
+                        stat_row(ui, chrome, "Decoded", format!("{}", self.frames_decoded));
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Decode ms",
                             format!(
-                                "{} Hz / {} ch",
-                                self.audio_levels.sample_rate, self.audio_levels.channels
-                            )
-                        } else {
-                            "-".into()
-                        },
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        t(self.language, "monitor.av_buffer"),
-                        buffer_label,
-                    );
+                                "{:.2} (peak {:.2})",
+                                self.decode_ms_avg, self.decode_ms_peak
+                            ),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Wire queue",
+                            format!("{}", self.wire_queue_depth),
+                        );
+                        stat_row(ui, chrome, "Reconnects", format!("{}", self.reconnects));
+                        stat_row(ui, chrome, "Session", format!("{:?}", self.session_state));
 
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(t(self.language, "monitor.source_info"))
-                            .strong()
-                            .color(chrome.text),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Resolution",
-                        if self.frame_w > 0 {
-                            format!("{}×{}", self.frame_w, self.frame_h)
-                        } else {
-                            "-".into()
-                        },
-                    );
-                    stat_row(ui, chrome, "Bitrate", format_bitrate(self.bitrate_bps));
-                    stat_row(ui, chrome, "Bytes RX", format_bytes(self.bytes_received));
-                    stat_row(
-                        ui,
-                        chrome,
-                        "URL",
-                        self.selected.clone().unwrap_or_else(|| "-".into()),
-                    );
-                    ui.add_space(8.0);
-                    stat_row(
-                        ui,
-                        chrome,
-                        t(self.language, "simd"),
-                        self.simd_summary.clone(),
-                    );
-                });
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(t(self.language, "monitor.audio"))
+                                .strong()
+                                .color(chrome.text),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Audio packets",
+                            format!("{}", self.audio_frames),
+                        );
+                        stat_row(ui, chrome, "L", format_dbfs(self.audio_levels.peak_l));
+                        stat_row(ui, chrome, "R", format_dbfs(self.audio_levels.peak_r));
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Format",
+                            if self.audio_levels.sample_rate > 0 {
+                                format!(
+                                    "{} Hz / {} ch",
+                                    self.audio_levels.sample_rate, self.audio_levels.channels
+                                )
+                            } else {
+                                "-".into()
+                            },
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            t(self.language, "monitor.av_buffer"),
+                            buffer_label,
+                        );
+
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(t(self.language, "monitor.source_info"))
+                                .strong()
+                                .color(chrome.text),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Resolution",
+                            if self.frame_w > 0 {
+                                format!("{}×{}", self.frame_w, self.frame_h)
+                            } else {
+                                "-".into()
+                            },
+                        );
+                        stat_row(ui, chrome, "Bitrate", format_bitrate(self.bitrate_bps));
+                        stat_row(ui, chrome, "Bytes RX", format_bytes(self.bytes_received));
+                        stat_row(
+                            ui,
+                            chrome,
+                            "URL",
+                            self.selected.clone().unwrap_or_else(|| "-".into()),
+                        );
+                        ui.add_space(8.0);
+                        stat_row(
+                            ui,
+                            chrome,
+                            t(self.language, "simd"),
+                            self.simd_summary.clone(),
+                        );
+                    });
             });
     }
 
@@ -1264,6 +1267,7 @@ impl MonitorApp {
                 ui.separator();
                 ui.add_space(8.0);
                 egui::ScrollArea::vertical()
+                    .id_salt("monitor_log")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());

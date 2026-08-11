@@ -121,6 +121,7 @@ pub fn show(
         ui.separator();
 
         egui::ScrollArea::vertical()
+            .id_salt("prefs_body")
             .max_height(ctx.content_rect().height() * 0.75)
             .show(ui, |ui| {
                 ui.add_space(12.0);
@@ -230,6 +231,7 @@ pub fn show(
                         .show(ui, |ui| {
                             ui.set_min_height(100.0);
                             egui::ScrollArea::vertical()
+                                .id_salt("prefs_audio_devices")
                                 .max_height(120.0)
                                 .show(ui, |ui| {
                                     let default_selected = selected_audio.is_none();
