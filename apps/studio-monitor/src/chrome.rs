@@ -89,6 +89,10 @@ impl UiChrome {
         visuals.window_stroke = egui::Stroke::new(1.0, self.border);
         visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, self.border);
         ctx.set_visuals(visuals);
+        // Match Test Patterns: UI chrome text should not be drag-selectable.
+        ctx.all_styles_mut(|style| {
+            style.interaction.selectable_labels = false;
+        });
     }
 }
 

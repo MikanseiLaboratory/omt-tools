@@ -17,6 +17,33 @@ Open Media Transport production utilities inspired by NDI Tools.
 
 Runtime media stack: [`MikanseiLaboratory/openmediatransport-rs`](https://github.com/MikanseiLaboratory/openmediatransport-rs) + [`MikanseiLaboratory/vmx-rs`](https://github.com/MikanseiLaboratory/vmx-rs).
 
+## Docs & Guides
+
+The launcher **Docs & Guides** button opens this section.
+
+- [Studio Monitor](#studio-monitor) — browse LAN OMT sources, fullscreen preview
+- [Test Patterns](#test-patterns) — send SMPTE-style patterns + tone
+- [Windows install path](#install-destination-windows)
+
+A [project wiki](https://github.com/MikanseiLaboratory/omt-tools/wiki) can host longer guides once pages are added.
+
+### Studio Monitor
+
+- Discover and view OMT sources on the LAN
+- Fullscreen: toolbar button, **F11**, or double-click the preview (Esc / click / F11 to exit)
+- Preferences cover language, theme, audio device, buffer delay, and quality
+
+### Test Patterns
+
+- Send SMPTE-style patterns and tone over OMT from the companion tool launched by the suite
+
+## Install destination (Windows)
+
+Windows installers place the suite under a MikanseiLaboratory folder (same layout as [vmix-utility](https://github.com/MikanseiLaboratory/vmix-utility)):
+
+- Per-machine: `C:\Program Files\MikanseiLaboratory\OMT Tools`
+- Per-user: `%LOCALAPPDATA%\MikanseiLaboratory\OMT Tools`
+
 ## Prerequisites
 
 - Rust **1.97+** (edition 2024)

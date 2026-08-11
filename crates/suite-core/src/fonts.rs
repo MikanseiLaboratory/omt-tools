@@ -29,8 +29,10 @@ pub fn load_cjk_font_bytes() -> Option<Vec<u8>> {
     load_cjk_font().map(|(bytes, _)| bytes)
 }
 
-/// Install a simple modern Japanese UI font as the primary proportional face,
-/// with Segoe UI as Latin companion when present.
+/// Install Latin + Japanese UI fonts for egui.
+///
+/// Segoe UI (or platform UI sans) is primary so English stays clean; Japanese
+/// faces are registered as fallbacks for kana/kanji.
 #[cfg(feature = "egui-fonts")]
 pub fn install_egui_cjk_fonts(ctx: &egui::Context) {
     use std::sync::Arc;
@@ -54,17 +56,17 @@ pub fn install_egui_cjk_fonts(ctx: &egui::Context) {
     }
 
     if let Some(proportional) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-        // JP first so kana/kanji use the business gothic; Latin falls through to Segoe / egui.
-        if fonts.font_data.contains_key("omt_jp") {
-            proportional.insert(0, "omt_jp".into());
-        }
+        // Latin first so English uses Segoe; JP second for kana/kanji fallback.
         if fonts.font_data.contains_key("omt_latin") {
-            let insert_at = if fonts.font_data.contains_key("omt_jp") {
+            proportional.insert(0, "omt_latin".into());
+        }
+        if fonts.font_data.contains_key("omt_jp") {
+            let insert_at = if fonts.font_data.contains_key("omt_latin") {
                 1
             } else {
                 0
             };
-            proportional.insert(insert_at, "omt_latin".into());
+            proportional.insert(insert_at, "omt_jp".into());
         }
     }
     if let Some(monospace) = fonts.families.get_mut(&egui::FontFamily::Monospace)

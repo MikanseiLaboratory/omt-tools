@@ -690,7 +690,7 @@ impl MonitorApp {
             PrefsAction::EnterFullscreen => self.enter_fullscreen(ctx),
             PrefsAction::OpenHelp => {
                 ctx.open_url(egui::OpenUrl::new_tab(
-                    "https://github.com/MikanseiLaboratory/omt-tools",
+                    "https://github.com/MikanseiLaboratory/omt-tools#docs--guides",
                 ));
             }
             PrefsAction::OpenLicense => {
@@ -727,12 +727,19 @@ impl eframe::App for MonitorApp {
         self.apply_theme_if_needed(&ctx);
         let got_frame = self.on_tick(&ctx);
 
-        // Escape handling
+        // Escape / F11 fullscreen handling
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             if self.preferences_open {
                 self.preferences_open = false;
             } else if self.fullscreen {
                 self.exit_fullscreen(&ctx);
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::F11)) {
+            if self.fullscreen {
+                self.exit_fullscreen(&ctx);
+            } else {
+                self.enter_fullscreen(&ctx);
             }
         }
 
@@ -865,6 +872,9 @@ impl MonitorApp {
         self.preview_h = picture.height();
 
         let resp = ui.interact(picture, ui.id().with("preview"), Sense::click_and_drag());
+        if resp.double_clicked() {
+            self.enter_fullscreen(ui.ctx());
+        }
         if resp.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll.abs() > f32::EPSILON {
@@ -919,11 +929,14 @@ impl MonitorApp {
                     if chip(ui, chrome, t(self.language, "monitor.zoom_reset"), false) {
                         self.zoom_reset();
                     }
+                    if chip(ui, chrome, t(self.language, "monitor.fullscreen"), false) {
+                        self.enter_fullscreen(ui.ctx());
+                    }
                     if chip(ui, chrome, t(self.language, "monitor.preferences"), false) {
                         self.open_preferences();
                     }
                     ui.label(
-                        RichText::new("wheel = zoom · middle-drag = pan")
+                        RichText::new("wheel = zoom · middle-drag = pan · F11 / double-click = fullscreen")
                             .small()
                             .color(chrome.text_muted),
                     );

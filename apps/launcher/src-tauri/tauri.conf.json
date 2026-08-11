@@ -40,6 +40,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "MikanseiLaboratory",
     "createUpdaterArtifacts": true,
     "externalBin": [
       "binaries/omt-studio-monitor",
@@ -54,7 +55,14 @@
     ],
     "windows": {
       "digestAlgorithm": "sha256",
-      "certificateThumbprint": null
+      "certificateThumbprint": null,
+      "wix": {
+        "template": "./windows/main.wxs"
+      },
+      "nsis": {
+        "template": "./windows/installer.nsi",
+        "installMode": "both"
+      }
     },
     "macOS": {
       "minimumSystemVersion": "11.0"
