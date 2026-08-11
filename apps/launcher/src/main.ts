@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { openUrl } from "@tauri-apps/plugin-opener";
+
+const DOCS_URL = "https://github.com/MikanseiLaboratory/omt-tools#readme";
 
 type ToolCard = {
   id: string;
@@ -273,12 +276,12 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   $("settings-btn").addEventListener("click", () => setSettingsOpen(!settingsOpen));
   $("settings-backdrop").addEventListener("click", () => setSettingsOpen(false));
-  $("docs-btn").addEventListener("click", () => {
-    window.open(
-      "https://github.com/MikanseiLaboratory/omt-tools#readme",
-      "_blank",
-      "noopener,noreferrer",
-    );
+  $("docs-btn").addEventListener("click", async () => {
+    try {
+      await openUrl(DOCS_URL);
+    } catch (err) {
+      showToast(String(err));
+    }
   });
 
   $("save-settings").addEventListener("click", async () => {

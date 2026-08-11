@@ -28,9 +28,12 @@ type DiscoveryResult = Result<Vec<DiscoveredSource>, String>;
 
 const ZOOM_MIN: f32 = 0.1;
 const ZOOM_MAX: f32 = 8.0;
-const SIDEBAR_W: f32 = 280.0;
+const SIDEBAR_W: f32 = 300.0;
 const STATS_W: f32 = 280.0;
 const LOG_H: f32 = 180.0;
+/// Outer inset + gap between chrome panels (sidebar / preview / stats / log).
+const LAYOUT_GAP: f32 = 14.0;
+const TOOLBAR_H: f32 = 48.0;
 const ACTION_SAFE_FRAC: f32 = 0.93;
 const TITLE_SAFE_FRAC: f32 = 0.90;
 
@@ -690,7 +693,7 @@ impl MonitorApp {
             PrefsAction::EnterFullscreen => self.enter_fullscreen(ctx),
             PrefsAction::OpenHelp => {
                 ctx.open_url(egui::OpenUrl::new_tab(
-                    "https://github.com/MikanseiLaboratory/omt-tools",
+                    "https://github.com/MikanseiLaboratory/omt-tools#readme",
                 ));
             }
             PrefsAction::OpenLicense => {
@@ -727,12 +730,19 @@ impl eframe::App for MonitorApp {
         self.apply_theme_if_needed(&ctx);
         let got_frame = self.on_tick(&ctx);
 
-        // Escape handling
+        // Escape / F11 fullscreen handling
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             if self.preferences_open {
                 self.preferences_open = false;
             } else if self.fullscreen {
                 self.exit_fullscreen(&ctx);
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::F11)) {
+            if self.fullscreen {
+                self.exit_fullscreen(&ctx);
+            } else {
+                self.enter_fullscreen(&ctx);
             }
         }
 
@@ -815,27 +825,27 @@ impl MonitorApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(chrome.bg))
             .show(ui, |ui| {
-                let total = ui.available_rect_before_wrap();
+                let gap = LAYOUT_GAP;
+                let total = ui.available_rect_before_wrap().shrink(gap);
                 let log_h = LOG_H.min(total.height() * 0.35);
-                let top_h = (total.height() - log_h).max(100.0);
+                let top_h = (total.height() - log_h - gap).max(100.0);
 
                 let top = Rect::from_min_size(total.min, Vec2::new(total.width(), top_h));
                 let bottom = Rect::from_min_size(
-                    Pos2::new(total.min.x, total.min.y + top_h),
+                    Pos2::new(total.min.x, total.min.y + top_h + gap),
                     Vec2::new(total.width(), log_h),
                 );
 
                 let sidebar = Rect::from_min_size(top.min, Vec2::new(SIDEBAR_W, top.height()));
                 let stats = Rect::from_min_max(Pos2::new(top.max.x - STATS_W, top.min.y), top.max);
                 let preview_col = Rect::from_min_max(
-                    Pos2::new(sidebar.max.x, top.min.y),
-                    Pos2::new(stats.min.x, top.max.y),
+                    Pos2::new(sidebar.max.x + gap, top.min.y),
+                    Pos2::new(stats.min.x - gap, top.max.y),
                 );
-                let toolbar_h = 40.0;
                 let toolbar =
-                    Rect::from_min_size(preview_col.min, Vec2::new(preview_col.width(), toolbar_h));
+                    Rect::from_min_size(preview_col.min, Vec2::new(preview_col.width(), TOOLBAR_H));
                 let picture = Rect::from_min_max(
-                    Pos2::new(preview_col.min.x, preview_col.min.y + toolbar_h),
+                    Pos2::new(preview_col.min.x, preview_col.min.y + TOOLBAR_H + gap),
                     preview_col.max,
                 );
 
@@ -859,12 +869,25 @@ impl MonitorApp {
     }
 
     fn paint_picture_layer(&mut self, ui: &mut Ui, chrome: UiChrome, picture: Rect) {
-        // Opaque letterbox behind the picture (still under chrome panels).
-        ui.painter().rect_filled(picture, 0.0, chrome.bg);
-        self.preview_w = picture.width();
-        self.preview_h = picture.height();
+        // Card chrome so the gap against neighboring panels is visible.
+        let radius = 6.0;
+        ui.painter().rect_filled(picture, radius, chrome.panel);
+        ui.painter().rect_stroke(
+            picture,
+            radius,
+            egui::Stroke::new(1.0, chrome.border),
+            egui::StrokeKind::Inside,
+        );
+        // Inset the interactive / video region so content isn't flush to the card edge.
+        let inset = 8.0;
+        let content = picture.shrink(inset);
+        self.preview_w = content.width();
+        self.preview_h = content.height();
 
-        let resp = ui.interact(picture, ui.id().with("preview"), Sense::click_and_drag());
+        let resp = ui.interact(content, ui.id().with("preview"), Sense::click_and_drag());
+        if resp.double_clicked() {
+            self.enter_fullscreen(ui.ctx());
+        }
         if resp.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll.abs() > f32::EPSILON {
@@ -889,13 +912,12 @@ impl MonitorApp {
         let has_frame = self.texture.is_some() && self.frame_w > 0 && self.frame_h > 0;
         if has_frame {
             let (dw, dh) = self.display_size();
-            let origin = picture.min + Vec2::new(self.pan_x, self.pan_y);
+            let origin = content.min + Vec2::new(self.pan_x, self.pan_y);
             let video_rect = Rect::from_min_size(origin, Vec2::new(dw, dh));
-            self.paint_video_stack(ui, chrome, video_rect, picture);
+            self.paint_video_stack(ui, chrome, video_rect, content);
         } else {
-            // Centered in the full picture viewport (not a 1×1 pan origin).
             ui.painter().text(
-                picture.center(),
+                content.center(),
                 egui::Align2::CENTER_CENTER,
                 t(self.language, "monitor.waiting"),
                 egui::FontId::proportional(16.0),
@@ -908,10 +930,12 @@ impl MonitorApp {
         egui::Frame::NONE
             .fill(chrome.panel)
             .stroke(egui::Stroke::new(1.0, chrome.border))
-            .inner_margin(egui::Margin::symmetric(12, 8))
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(16, 12))
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
                     ui.label(RichText::new(&self.stall_text).color(chrome.text));
                     ui.label(
                         RichText::new(format!("{:.0}%", self.zoom * 100.0)).color(chrome.text),
@@ -919,13 +943,18 @@ impl MonitorApp {
                     if chip(ui, chrome, t(self.language, "monitor.zoom_reset"), false) {
                         self.zoom_reset();
                     }
+                    if chip(ui, chrome, t(self.language, "monitor.fullscreen"), false) {
+                        self.enter_fullscreen(ui.ctx());
+                    }
                     if chip(ui, chrome, t(self.language, "monitor.preferences"), false) {
                         self.open_preferences();
                     }
                     ui.label(
-                        RichText::new("wheel = zoom · middle-drag = pan")
-                            .small()
-                            .color(chrome.text_muted),
+                        RichText::new(
+                            "wheel = zoom · middle-drag = pan · F11 / double-click = fullscreen",
+                        )
+                        .small()
+                        .color(chrome.text_muted),
                     );
                 });
             });
@@ -935,123 +964,115 @@ impl MonitorApp {
         egui::Frame::NONE
             .fill(chrome.panel)
             .stroke(egui::Stroke::new(1.0, chrome.border))
-            .inner_margin(0.0)
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(14, 14))
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
                 ui.horizontal(|ui| {
-                    ui.add_space(12.0);
                     ui.label(
                         RichText::new(t(self.language, "monitor.sources"))
                             .strong()
                             .color(chrome.text),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(8.0);
                         if chip(ui, chrome, t(self.language, "monitor.refresh"), false) {
                             self.request_refresh(false);
                         }
                     });
                 });
+                ui.add_space(10.0);
                 ui.separator();
+                ui.add_space(10.0);
 
                 egui::ScrollArea::vertical()
+                    .id_salt("monitor_sources")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.add_space(6.0);
-                        ui.indent("source-list", |ui| {
-                            let none_sel = self.selected.is_none();
-                            if source_row(
-                                ui,
-                                chrome,
-                                t(self.language, "monitor.none"),
-                                "",
-                                none_sel,
-                            ) {
-                                self.disconnect_source();
-                            }
+                        let none_sel = self.selected.is_none();
+                        if source_row(ui, chrome, t(self.language, "monitor.none"), "", none_sel) {
+                            self.disconnect_source();
+                        }
 
-                            if self.discovered.is_empty() {
-                                ui.add_space(8.0);
-                                ui.label(
-                                    RichText::new(t(self.language, "monitor.no_sources"))
-                                        .color(chrome.text_muted)
-                                        .small(),
-                                );
-                            } else {
-                                let mut hosts: Vec<(String, Vec<DiscoveredSource>)> = Vec::new();
-                                for s in &self.discovered {
-                                    if let Some((_, list)) =
-                                        hosts.iter_mut().find(|(h, _)| h == &s.host)
-                                    {
-                                        list.push(s.clone());
-                                    } else {
-                                        hosts.push((s.host.clone(), vec![s.clone()]));
-                                    }
+                        if self.discovered.is_empty() {
+                            ui.add_space(12.0);
+                            ui.label(
+                                RichText::new(t(self.language, "monitor.no_sources"))
+                                    .color(chrome.text_muted)
+                                    .small(),
+                            );
+                        } else {
+                            let mut hosts: Vec<(String, Vec<DiscoveredSource>)> = Vec::new();
+                            for s in &self.discovered {
+                                if let Some((_, list)) =
+                                    hosts.iter_mut().find(|(h, _)| h == &s.host)
+                                {
+                                    list.push(s.clone());
+                                } else {
+                                    hosts.push((s.host.clone(), vec![s.clone()]));
                                 }
-                                for (host, sources) in hosts {
-                                    ui.add_space(10.0);
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            RichText::new(host.to_uppercase())
-                                                .size(11.0)
-                                                .strong()
-                                                .color(chrome.text_muted),
-                                        );
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                ui.label(
-                                                    RichText::new(format!("{}", sources.len()))
-                                                        .size(11.0)
-                                                        .color(chrome.text_muted),
-                                                );
-                                            },
-                                        );
-                                    });
-                                    ui.add_space(2.0);
-                                    for s in sources {
-                                        let label = if s.source.is_empty() {
-                                            s.name.clone()
-                                        } else {
-                                            s.source.clone()
-                                        };
-                                        let selected =
-                                            self.selected.as_deref() == Some(s.url.as_str());
-                                        if source_row(
-                                            ui,
-                                            chrome,
-                                            &label,
-                                            &format!(":{}", s.port),
-                                            selected,
-                                        ) {
-                                            self.select(s.url.clone(), s.addresses.clone());
-                                        }
+                            }
+                            for (host, sources) in hosts {
+                                ui.add_space(16.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(host.to_uppercase())
+                                            .size(11.0)
+                                            .strong()
+                                            .color(chrome.text_muted),
+                                    );
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new(format!("{}", sources.len()))
+                                                    .size(11.0)
+                                                    .color(chrome.text_muted),
+                                            );
+                                        },
+                                    );
+                                });
+                                ui.add_space(8.0);
+                                for s in sources {
+                                    let label = if s.source.is_empty() {
+                                        s.name.clone()
+                                    } else {
+                                        s.source.clone()
+                                    };
+                                    let selected = self.selected.as_deref() == Some(s.url.as_str());
+                                    if source_row(
+                                        ui,
+                                        chrome,
+                                        &label,
+                                        &format!(":{}", s.port),
+                                        selected,
+                                    ) {
+                                        self.select(s.url.clone(), s.addresses.clone());
                                     }
                                 }
                             }
-                            ui.add_space(8.0);
-                        });
+                        }
+                        ui.add_space(12.0);
                     });
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.add_space(12.0);
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new(t(self.language, "monitor.preferences"))
-                                        .color(chrome.text),
-                                )
-                                .fill(chrome.surface)
-                                .min_size(Vec2::new(ui.available_width() - 24.0, 32.0)),
+                    ui.add_space(12.0);
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(t(self.language, "monitor.preferences"))
+                                    .color(chrome.text),
                             )
-                            .clicked()
-                        {
-                            self.open_preferences();
-                        }
-                    });
+                            .fill(chrome.surface)
+                            .corner_radius(6.0)
+                            .min_size(Vec2::new(ui.available_width(), 36.0)),
+                        )
+                        .clicked()
+                    {
+                        self.open_preferences();
+                    }
+                    ui.add_space(10.0);
                     ui.separator();
+                    ui.add_space(4.0);
                 });
             });
     }
@@ -1082,140 +1103,144 @@ impl MonitorApp {
         egui::Frame::NONE
             .fill(chrome.panel)
             .stroke(egui::Stroke::new(1.0, chrome.border))
-            .inner_margin(12.0)
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(16, 14))
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let source_fps = if self.fps_d > 0 {
-                        self.fps_n as f32 / self.fps_d as f32
-                    } else {
-                        0.0
-                    };
-                    let buffer_label = format_buffer_stats(
-                        self.language,
-                        &self.settings.buffer,
-                        self.video_buffer_delay_ms,
-                        self.audio_buffer_delay_ms,
-                        self.buffer_fps().0,
-                        self.buffer_fps().1,
-                    );
+                egui::ScrollArea::vertical()
+                    .id_salt("monitor_stats")
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 10.0;
+                        let source_fps = if self.fps_d > 0 {
+                            self.fps_n as f32 / self.fps_d as f32
+                        } else {
+                            0.0
+                        };
+                        let buffer_label = format_buffer_stats(
+                            self.language,
+                            &self.settings.buffer,
+                            self.video_buffer_delay_ms,
+                            self.audio_buffer_delay_ms,
+                            self.buffer_fps().0,
+                            self.buffer_fps().1,
+                        );
 
-                    ui.label(
-                        RichText::new(t(self.language, "monitor.stats"))
-                            .strong()
-                            .color(chrome.text),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Display FPS",
-                        format!("{:.1}", self.display_fps),
-                    );
-                    stat_row(ui, chrome, "Source FPS", format!("{source_fps:.2}"));
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Presented",
-                        format!("{}", self.frames_presented),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Source dropped",
-                        format!("{}", self.source_dropped),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Render skipped",
-                        format!("{}", self.frames_render_skipped),
-                    );
-                    stat_row(ui, chrome, "Net dropped", format!("{}", self.net_dropped));
-                    stat_row(ui, chrome, "Decoded", format!("{}", self.frames_decoded));
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Decode ms",
-                        format!(
-                            "{:.2} (peak {:.2})",
-                            self.decode_ms_avg, self.decode_ms_peak
-                        ),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Wire queue",
-                        format!("{}", self.wire_queue_depth),
-                    );
-                    stat_row(ui, chrome, "Reconnects", format!("{}", self.reconnects));
-                    stat_row(ui, chrome, "Session", format!("{:?}", self.session_state));
-
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(t(self.language, "monitor.audio"))
-                            .strong()
-                            .color(chrome.text),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Audio packets",
-                        format!("{}", self.audio_frames),
-                    );
-                    stat_row(ui, chrome, "L", format_dbfs(self.audio_levels.peak_l));
-                    stat_row(ui, chrome, "R", format_dbfs(self.audio_levels.peak_r));
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Format",
-                        if self.audio_levels.sample_rate > 0 {
+                        ui.label(
+                            RichText::new(t(self.language, "monitor.stats"))
+                                .strong()
+                                .color(chrome.text),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Display FPS",
+                            format!("{:.1}", self.display_fps),
+                        );
+                        stat_row(ui, chrome, "Source FPS", format!("{source_fps:.2}"));
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Presented",
+                            format!("{}", self.frames_presented),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Source dropped",
+                            format!("{}", self.source_dropped),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Render skipped",
+                            format!("{}", self.frames_render_skipped),
+                        );
+                        stat_row(ui, chrome, "Net dropped", format!("{}", self.net_dropped));
+                        stat_row(ui, chrome, "Decoded", format!("{}", self.frames_decoded));
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Decode ms",
                             format!(
-                                "{} Hz / {} ch",
-                                self.audio_levels.sample_rate, self.audio_levels.channels
-                            )
-                        } else {
-                            "-".into()
-                        },
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        t(self.language, "monitor.av_buffer"),
-                        buffer_label,
-                    );
+                                "{:.2} (peak {:.2})",
+                                self.decode_ms_avg, self.decode_ms_peak
+                            ),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Wire queue",
+                            format!("{}", self.wire_queue_depth),
+                        );
+                        stat_row(ui, chrome, "Reconnects", format!("{}", self.reconnects));
+                        stat_row(ui, chrome, "Session", format!("{:?}", self.session_state));
 
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(t(self.language, "monitor.source_info"))
-                            .strong()
-                            .color(chrome.text),
-                    );
-                    stat_row(
-                        ui,
-                        chrome,
-                        "Resolution",
-                        if self.frame_w > 0 {
-                            format!("{}×{}", self.frame_w, self.frame_h)
-                        } else {
-                            "-".into()
-                        },
-                    );
-                    stat_row(ui, chrome, "Bitrate", format_bitrate(self.bitrate_bps));
-                    stat_row(ui, chrome, "Bytes RX", format_bytes(self.bytes_received));
-                    stat_row(
-                        ui,
-                        chrome,
-                        "URL",
-                        self.selected.clone().unwrap_or_else(|| "-".into()),
-                    );
-                    ui.add_space(8.0);
-                    stat_row(
-                        ui,
-                        chrome,
-                        t(self.language, "simd"),
-                        self.simd_summary.clone(),
-                    );
-                });
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(t(self.language, "monitor.audio"))
+                                .strong()
+                                .color(chrome.text),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Audio packets",
+                            format!("{}", self.audio_frames),
+                        );
+                        stat_row(ui, chrome, "L", format_dbfs(self.audio_levels.peak_l));
+                        stat_row(ui, chrome, "R", format_dbfs(self.audio_levels.peak_r));
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Format",
+                            if self.audio_levels.sample_rate > 0 {
+                                format!(
+                                    "{} Hz / {} ch",
+                                    self.audio_levels.sample_rate, self.audio_levels.channels
+                                )
+                            } else {
+                                "-".into()
+                            },
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            t(self.language, "monitor.av_buffer"),
+                            buffer_label,
+                        );
+
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(t(self.language, "monitor.source_info"))
+                                .strong()
+                                .color(chrome.text),
+                        );
+                        stat_row(
+                            ui,
+                            chrome,
+                            "Resolution",
+                            if self.frame_w > 0 {
+                                format!("{}×{}", self.frame_w, self.frame_h)
+                            } else {
+                                "-".into()
+                            },
+                        );
+                        stat_row(ui, chrome, "Bitrate", format_bitrate(self.bitrate_bps));
+                        stat_row(ui, chrome, "Bytes RX", format_bytes(self.bytes_received));
+                        stat_row(
+                            ui,
+                            chrome,
+                            "URL",
+                            self.selected.clone().unwrap_or_else(|| "-".into()),
+                        );
+                        ui.add_space(8.0);
+                        stat_row(
+                            ui,
+                            chrome,
+                            t(self.language, "simd"),
+                            self.simd_summary.clone(),
+                        );
+                    });
             });
     }
 
@@ -1223,22 +1248,26 @@ impl MonitorApp {
         egui::Frame::NONE
             .fill(chrome.panel)
             .stroke(egui::Stroke::new(1.0, chrome.border))
-            .inner_margin(0.0)
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(14, 12))
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
                 ui.horizontal(|ui| {
-                    ui.add_space(12.0);
                     ui.label(
                         RichText::new(t(self.language, "monitor.log"))
                             .strong()
                             .color(chrome.text),
                     );
+                    ui.add_space(8.0);
                     if chip(ui, chrome, t(self.language, "monitor.clear_log"), false) {
                         self.log_lines.clear();
                     }
                 });
+                ui.add_space(8.0);
                 ui.separator();
+                ui.add_space(8.0);
                 egui::ScrollArea::vertical()
+                    .id_salt("monitor_log")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
@@ -1290,14 +1319,14 @@ fn source_row(ui: &mut Ui, chrome: UiChrome, title: &str, subtitle: &str, select
     let frame = egui::Frame::NONE
         .fill(fill)
         .stroke(egui::Stroke::new(1.0, stroke))
-        .corner_radius(6.0)
-        .inner_margin(egui::Margin::symmetric(10, 8));
+        .corner_radius(8.0)
+        .inner_margin(egui::Margin::symmetric(14, 12));
 
     let inner = frame.show(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.horizontal(|ui| {
             // Selection dot
-            let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+            let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
             ui.painter().circle_filled(
                 dot_rect.center(),
                 3.5,
@@ -1307,8 +1336,9 @@ fn source_row(ui: &mut Ui, chrome: UiChrome, title: &str, subtitle: &str, select
                     chrome.text_muted
                 },
             );
-            ui.add_space(6.0);
+            ui.add_space(10.0);
             ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
                 ui.label(RichText::new(title).size(13.0).strong().color(title_color));
                 if !subtitle.is_empty() {
                     ui.label(RichText::new(subtitle).size(11.0).color(chrome.text_muted));
@@ -1317,7 +1347,7 @@ fn source_row(ui: &mut Ui, chrome: UiChrome, title: &str, subtitle: &str, select
         });
     });
 
-    ui.add_space(4.0);
+    ui.add_space(10.0);
     inner.response.interact(Sense::click()).clicked()
 }
 
