@@ -936,9 +936,11 @@ impl MonitorApp {
                         self.open_preferences();
                     }
                     ui.label(
-                        RichText::new("wheel = zoom · middle-drag = pan · F11 / double-click = fullscreen")
-                            .small()
-                            .color(chrome.text_muted),
+                        RichText::new(
+                            "wheel = zoom · middle-drag = pan · F11 / double-click = fullscreen",
+                        )
+                        .small()
+                        .color(chrome.text_muted),
                     );
                 });
             });
