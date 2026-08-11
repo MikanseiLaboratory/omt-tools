@@ -690,7 +690,7 @@ impl MonitorApp {
             PrefsAction::EnterFullscreen => self.enter_fullscreen(ctx),
             PrefsAction::OpenHelp => {
                 ctx.open_url(egui::OpenUrl::new_tab(
-                    "https://github.com/MikanseiLaboratory/omt-tools#docs--guides",
+                    "https://github.com/MikanseiLaboratory/omt-tools#readme",
                 ));
             }
             PrefsAction::OpenLicense => {
