@@ -94,7 +94,7 @@ pub fn show(
                 .fill(chrome.panel)
                 .stroke(egui::Stroke::new(1.0, chrome.border))
                 .corner_radius(8.0)
-                .inner_margin(egui::Margin::ZERO),
+                .inner_margin(egui::Margin::symmetric(4, 8)),
         );
 
     let response = modal.show(ctx, |ui| {
@@ -103,7 +103,7 @@ pub fn show(
 
         // Header
         ui.horizontal(|ui| {
-            ui.add_space(16.0);
+            ui.add_space(12.0);
             ui.label(
                 RichText::new(t(language, "monitor.preferences"))
                     .strong()
@@ -111,7 +111,7 @@ pub fn show(
                     .color(chrome.text),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(8.0);
+                ui.add_space(12.0);
                 if chip_button(ui, chrome, t(language, "back"), false) {
                     action = Some(PrefsAction::Close);
                 }
@@ -123,7 +123,7 @@ pub fn show(
         egui::ScrollArea::vertical()
             .max_height(ctx.content_rect().height() * 0.75)
             .show(ui, |ui| {
-                ui.add_space(8.0);
+                ui.add_space(12.0);
                 ui.indent("prefs-body", |ui| {
                     // —— Language / Theme ——
                     section_title(ui, chrome, t(language, "language"));

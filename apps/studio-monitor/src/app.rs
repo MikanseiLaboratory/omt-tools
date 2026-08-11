@@ -31,6 +31,9 @@ const ZOOM_MAX: f32 = 8.0;
 const SIDEBAR_W: f32 = 280.0;
 const STATS_W: f32 = 280.0;
 const LOG_H: f32 = 180.0;
+/// Outer inset + gap between chrome panels (sidebar / preview / stats / log).
+const LAYOUT_GAP: f32 = 10.0;
+const TOOLBAR_H: f32 = 44.0;
 const ACTION_SAFE_FRAC: f32 = 0.93;
 const TITLE_SAFE_FRAC: f32 = 0.90;
 
@@ -822,27 +825,27 @@ impl MonitorApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(chrome.bg))
             .show(ui, |ui| {
-                let total = ui.available_rect_before_wrap();
+                let gap = LAYOUT_GAP;
+                let total = ui.available_rect_before_wrap().shrink(gap);
                 let log_h = LOG_H.min(total.height() * 0.35);
-                let top_h = (total.height() - log_h).max(100.0);
+                let top_h = (total.height() - log_h - gap).max(100.0);
 
                 let top = Rect::from_min_size(total.min, Vec2::new(total.width(), top_h));
                 let bottom = Rect::from_min_size(
-                    Pos2::new(total.min.x, total.min.y + top_h),
+                    Pos2::new(total.min.x, total.min.y + top_h + gap),
                     Vec2::new(total.width(), log_h),
                 );
 
                 let sidebar = Rect::from_min_size(top.min, Vec2::new(SIDEBAR_W, top.height()));
                 let stats = Rect::from_min_max(Pos2::new(top.max.x - STATS_W, top.min.y), top.max);
                 let preview_col = Rect::from_min_max(
-                    Pos2::new(sidebar.max.x, top.min.y),
-                    Pos2::new(stats.min.x, top.max.y),
+                    Pos2::new(sidebar.max.x + gap, top.min.y),
+                    Pos2::new(stats.min.x - gap, top.max.y),
                 );
-                let toolbar_h = 40.0;
                 let toolbar =
-                    Rect::from_min_size(preview_col.min, Vec2::new(preview_col.width(), toolbar_h));
+                    Rect::from_min_size(preview_col.min, Vec2::new(preview_col.width(), TOOLBAR_H));
                 let picture = Rect::from_min_max(
-                    Pos2::new(preview_col.min.x, preview_col.min.y + toolbar_h),
+                    Pos2::new(preview_col.min.x, preview_col.min.y + TOOLBAR_H + gap),
                     preview_col.max,
                 );
 
@@ -918,7 +921,8 @@ impl MonitorApp {
         egui::Frame::NONE
             .fill(chrome.panel)
             .stroke(egui::Stroke::new(1.0, chrome.border))
-            .inner_margin(egui::Margin::symmetric(12, 8))
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(14, 10))
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
                 ui.horizontal(|ui| {
@@ -950,29 +954,30 @@ impl MonitorApp {
         egui::Frame::NONE
             .fill(chrome.panel)
             .stroke(egui::Stroke::new(1.0, chrome.border))
-            .inner_margin(0.0)
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(10, 10))
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
                 ui.horizontal(|ui| {
-                    ui.add_space(12.0);
                     ui.label(
                         RichText::new(t(self.language, "monitor.sources"))
                             .strong()
                             .color(chrome.text),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(8.0);
                         if chip(ui, chrome, t(self.language, "monitor.refresh"), false) {
                             self.request_refresh(false);
                         }
                     });
                 });
+                ui.add_space(6.0);
                 ui.separator();
+                ui.add_space(4.0);
 
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.add_space(6.0);
+                        ui.add_space(4.0);
                         ui.indent("source-list", |ui| {
                             let none_sel = self.selected.is_none();
                             if source_row(
@@ -1049,23 +1054,21 @@ impl MonitorApp {
                     });
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.add_space(12.0);
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new(t(self.language, "monitor.preferences"))
-                                        .color(chrome.text),
-                                )
-                                .fill(chrome.surface)
-                                .min_size(Vec2::new(ui.available_width() - 24.0, 32.0)),
+                    ui.add_space(10.0);
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(t(self.language, "monitor.preferences"))
+                                    .color(chrome.text),
                             )
-                            .clicked()
-                        {
-                            self.open_preferences();
-                        }
-                    });
+                            .fill(chrome.surface)
+                            .min_size(Vec2::new(ui.available_width(), 34.0)),
+                        )
+                        .clicked()
+                    {
+                        self.open_preferences();
+                    }
+                    ui.add_space(6.0);
                     ui.separator();
                 });
             });
@@ -1097,7 +1100,8 @@ impl MonitorApp {
         egui::Frame::NONE
             .fill(chrome.panel)
             .stroke(egui::Stroke::new(1.0, chrome.border))
-            .inner_margin(12.0)
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(14, 12))
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -1238,11 +1242,11 @@ impl MonitorApp {
         egui::Frame::NONE
             .fill(chrome.panel)
             .stroke(egui::Stroke::new(1.0, chrome.border))
-            .inner_margin(0.0)
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(12, 10))
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
                 ui.horizontal(|ui| {
-                    ui.add_space(12.0);
                     ui.label(
                         RichText::new(t(self.language, "monitor.log"))
                             .strong()
@@ -1252,7 +1256,9 @@ impl MonitorApp {
                         self.log_lines.clear();
                     }
                 });
+                ui.add_space(4.0);
                 ui.separator();
+                ui.add_space(4.0);
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -1332,7 +1338,7 @@ fn source_row(ui: &mut Ui, chrome: UiChrome, title: &str, subtitle: &str, select
         });
     });
 
-    ui.add_space(4.0);
+    ui.add_space(6.0);
     inner.response.interact(Sense::click()).clicked()
 }
 

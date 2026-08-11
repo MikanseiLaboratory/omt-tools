@@ -90,8 +90,11 @@ impl UiChrome {
         visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, self.border);
         ctx.set_visuals(visuals);
         // Match Test Patterns: UI chrome text should not be drag-selectable.
+        // Slightly roomier default spacing so panels feel less cramped.
         ctx.all_styles_mut(|style| {
             style.interaction.selectable_labels = false;
+            style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+            style.spacing.window_margin = egui::Margin::same(12);
         });
     }
 }
