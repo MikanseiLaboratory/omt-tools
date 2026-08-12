@@ -38,7 +38,7 @@ fn main() -> anyhow::Result<()> {
                     info.frames, info.width, info.height, info.bgra_len
                 );
                 if info.frames > 0 {
-                    // Convert one BGRA frame path into UYVY to estimate encode prep cost.
+                    // BGRA can be passed to Sender uncompressed. UYVY size is shown for comparison.
                     let rgb_w = info.width.max(2);
                     let rgb_h = info.height.max(1);
                     let mut dummy_rgb = vec![16u8; (rgb_w * rgb_h * 3) as usize];

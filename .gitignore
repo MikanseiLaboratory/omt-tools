@@ -12,3 +12,8 @@ node_modules/
 .idea/
 *.pdb
 received_frames/
+# Local bench / PGO artifacts
+target/bench-results/
+target/pgo-data/
+**/merged.profdata
+**/*.profraw

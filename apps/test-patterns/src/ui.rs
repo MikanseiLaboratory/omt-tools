@@ -15,14 +15,13 @@ use gpui::{
 };
 use image::{Frame, ImageBuffer, Rgba};
 use omt_media::{AudioToneConfig, SendSession, SendSessionConfig, SendStats};
-use openmediatransport::uyvy_to_rgba;
+use openmediatransport::{Quality, uyvy_to_rgba};
 use pattern_generator::{PatternKind, fill_uyvy, uyvy_from_image_path};
 use smallvec::smallvec;
 use suite_core::{
     Language, SimdCapabilities, TestPatternsConfig, load_test_patterns_config,
     reveal_in_file_manager, save_test_patterns_config, t,
 };
-use vmx::Profile;
 
 /// Frames for one full scroll cycle at ±100% animation speed.
 const ANIM_BASE_CYCLE_FRAMES: f32 = 300.0;
@@ -260,11 +259,11 @@ fn pattern_label(lang: Language, kind: PatternKind) -> &'static str {
     }
 }
 
-fn profile_label(profile: Profile) -> &'static str {
-    match profile {
-        Profile::OmtLq | Profile::Lq => "LQ",
-        Profile::OmtHq | Profile::Hq => "HQ",
-        _ => "SQ",
+fn quality_label(quality: Quality) -> &'static str {
+    match quality {
+        Quality::Low => "LQ",
+        Quality::High => "HQ",
+        Quality::Medium | Quality::Default => "SQ",
     }
 }
 
@@ -326,7 +325,7 @@ struct PatternsView {
     width: i32,
     height: i32,
     frame_rate: FrameRate,
-    profile: Profile,
+    quality: Quality,
     animate: bool,
     anim_speed_h_pct: i32,
     anim_speed_v_pct: i32,
@@ -392,7 +391,7 @@ impl PatternsView {
                 n: 30_000,
                 d: 1_001,
             },
-            profile: Profile::OmtSq,
+            quality: Quality::Medium,
             animate: true,
             anim_speed_h_pct: 100,
             anim_speed_v_pct: 100,
@@ -826,11 +825,11 @@ impl PatternsView {
         cx.notify();
     }
 
-    fn set_profile(&mut self, profile: Profile, cx: &mut Context<Self>) {
-        if self.profile == profile {
+    fn set_quality(&mut self, quality: Quality, cx: &mut Context<Self>) {
+        if self.quality == quality {
             return;
         }
-        self.profile = profile;
+        self.quality = quality;
         self.apply_settings();
         cx.notify();
     }
@@ -918,7 +917,7 @@ impl PatternsView {
             height: self.height,
             fps_n: self.frame_rate.n,
             fps_d: self.frame_rate.d,
-            profile: self.profile,
+            quality: self.quality,
             animate: self.animate && self.kind != PatternKind::Image,
             audio: AudioToneConfig {
                 sample_rate: self.sample_rate,
@@ -982,7 +981,7 @@ impl Render for PatternsView {
         let kind = self.kind;
         let tone_hz = self.tone_hz;
         let frame_rate = self.frame_rate;
-        let profile = self.profile;
+        let quality = self.quality;
         let open_menu = self.open_menu;
         let custom_menu = self.custom_menu;
         let thumbs = self.thumbs.clone();
@@ -1187,7 +1186,7 @@ impl Render for PatternsView {
                             frame_rate,
                             open_menu == Some(MenuKind::Fps),
                         ))
-                        .child(quality_control(cx, language, profile))
+                        .child(quality_control(cx, language, quality))
                         .child(level_control(
                             cx,
                             language,
@@ -2008,9 +2007,9 @@ fn fps_control(
 fn quality_control(
     cx: &mut Context<PatternsView>,
     language: Language,
-    selected: Profile,
+    selected: Quality,
 ) -> impl IntoElement {
-    let profiles = [Profile::OmtLq, Profile::OmtSq, Profile::OmtHq];
+    let qualities = [Quality::Low, Quality::Medium, Quality::High];
     div()
         .flex()
         .flex_col()
@@ -2026,19 +2025,19 @@ fn quality_control(
                 .flex()
                 .rounded_md()
                 .overflow_hidden()
-                .children(profiles.into_iter().map(|profile| {
-                    let active = selected == profile;
+                .children(qualities.into_iter().map(|quality| {
+                    let active = selected == quality;
                     div()
-                        .id(SharedString::from(profile_label(profile)))
+                        .id(SharedString::from(quality_label(quality)))
                         .px_3()
                         .py_1()
                         .bg(if active { rgb(0x2f6fed) } else { rgb(0x243041) })
                         .cursor_pointer()
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(profile_label(profile))
+                        .child(quality_label(quality))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.set_profile(profile, cx);
+                            this.set_quality(quality, cx);
                         }))
                         .into_any_element()
                 })),

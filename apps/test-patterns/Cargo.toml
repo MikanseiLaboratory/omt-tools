@@ -24,4 +24,3 @@ smallvec = "1"
 suite-core.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-vmx.workspace = true

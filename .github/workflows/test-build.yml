@@ -38,6 +38,13 @@ jobs:
         with:
           bun-version: '1.2.19'
 
+      # tauri-bundler fetches NSIS with attohttpc (no retries). Prefetch with curl
+      # so Windows jobs do not fail on `io: Peer disconnected` after a long compile.
+      - name: Prefetch NSIS toolchain (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/ci/prefetch-nsis.ps1
+
       - name: Build sidecar tools
         run: cargo build --release --target ${{ matrix.rust_target }} -p omt-studio-monitor -p omt-test-patterns
 
