@@ -18,3 +18,4 @@ tracing.workspace = true
 vmx.workspace = true
 
 [dev-dependencies]
+suite-core.workspace = true
