@@ -7,6 +7,10 @@ license.workspace = true
 authors.workspace = true
 description = "Headless Studio Monitor present-path performance harness"
 
+[[bin]]
+name = "monitor-bench"
+path = "src/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true

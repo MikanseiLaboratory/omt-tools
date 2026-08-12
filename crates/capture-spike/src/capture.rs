@@ -69,11 +69,11 @@ impl CaptureProbe {
             Ok(Self {
                 backend: CaptureBackend::WindowsGraphicsCapture,
                 available: true,
-                notes: "Preferred backend: Windows Graphics Capture. OS picker / yellow border required. GPU frames must be mapped to CPU BGRA before UYVY+VMX.".into(),
+                notes: "Preferred backend: Windows Graphics Capture. OS picker / yellow border required. GPU frames map to CPU BGRA for Sender encode.".into(),
                 requirements: vec![
                     "Windows 10 1803+ (Win32 interop 1903+)".into(),
                     "User consent via Graphics Capture picker".into(),
-                    "BGRA→UYVY conversion before VMX encode".into(),
+                    "BGRA frames can be sent uncompressed to Sender".into(),
                 ],
             })
         } else if cfg!(target_os = "macos") {
@@ -85,7 +85,7 @@ impl CaptureProbe {
                     "macOS 12.3+".into(),
                     "Screen Recording permission".into(),
                     "NSScreenCaptureUsageDescription in Info.plist".into(),
-                    "BGRA→UYVY conversion before VMX encode".into(),
+                    "BGRA frames can be sent uncompressed to Sender".into(),
                 ],
             })
         } else {

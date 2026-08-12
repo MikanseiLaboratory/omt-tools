@@ -303,7 +303,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -314,7 +314,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -357,7 +357,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
  "x11rb",
 ]
 
@@ -5209,7 +5209,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.20",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6123,7 +6123,6 @@ dependencies = [
  "suite-core",
  "tracing",
  "tracing-subscriber",
- "vmx",
 ]
 
 [[package]]
@@ -6187,7 +6186,7 @@ dependencies = [
 [[package]]
 name = "openmediatransport"
 version = "0.1.0"
-source = "git+https://github.com/MikanseiLaboratory/openmediatransport-rs#8fa1408e3cada1c53b1b9d33f1bd297ac94fe077"
+source = "git+https://github.com/MikanseiLaboratory/openmediatransport-rs#55ffd08ab899f8017056886157fb0d130ab36d5c"
 dependencies = [
  "bytes",
  "mdns-sd",
@@ -8197,7 +8196,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8291,7 +8290,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9551,7 +9550,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.20",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9610,7 +9609,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9928,7 +9927,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vmx"
 version = "0.1.0"
-source = "git+https://github.com/MikanseiLaboratory/vmx-rs#9980d38c541dea0ad7f9d5eff019f22d189c2c8c"
+source = "git+https://github.com/MikanseiLaboratory/vmx-rs#d860377cf91646a0c165dfbddc4467f4ee02762b"
 dependencies = [
  "rayon",
  "thiserror 2.0.20",

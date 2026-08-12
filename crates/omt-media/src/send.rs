@@ -8,10 +8,9 @@ use std::time::{Duration, Instant};
 
 use openmediatransport::{
     Codec, ColorSpace, Discovery, FrameType, MediaFrame, NETWORK_ASYNC_COUNT, NETWORK_SEND_BUFFER,
-    NETWORK_SEND_RECEIVE_BUFFER, OmtError, Sender, SenderConfig, SenderInfo,
+    NETWORK_SEND_RECEIVE_BUFFER, OmtError, Quality, Sender, SenderConfig, SenderInfo,
 };
 use parking_lot::Mutex;
-use vmx::{Codec as VmxCodec, Config as VmxConfig, Profile};
 
 use crate::runtime;
 
@@ -59,8 +58,8 @@ pub struct SendSessionConfig {
     pub fps_n: i32,
     /// Frame rate denominator.
     pub fps_d: i32,
-    /// VMX profile.
-    pub profile: Profile,
+    /// Encoding quality.
+    pub quality: Quality,
     /// Whether UYVY content changes every frame.
     pub animate: bool,
     /// Audio tone settings.
@@ -75,7 +74,7 @@ impl Default for SendSessionConfig {
             height: 1080,
             fps_n: 30,
             fps_d: 1,
-            profile: Profile::OmtSq,
+            quality: Quality::Medium,
             animate: true,
             audio: AudioToneConfig::default(),
         }
@@ -141,6 +140,7 @@ impl SendSession {
                 "MikanseiLaboratory",
                 env!("CARGO_PKG_VERSION"),
             ));
+            s.set_quality(config.quality);
         }
         let port = sender.lock().port();
         {
@@ -221,11 +221,11 @@ impl SendSession {
     /// Enable / disable per-frame content changes without restarting OMT.
     pub fn set_animate(&self, animate: bool) {
         self.animate.store(animate, Ordering::Relaxed);
-        // Drop any still-frame encode cache so the next frame matches.
+        // Drop any still-frame cache so the next frame matches.
         self.content_epoch.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Invalidate a cached still encode (pattern / image changed while not animating).
+    /// Invalidate a cached still frame (pattern / image changed while not animating).
     pub fn invalidate_content(&self) {
         self.content_epoch.fetch_add(1, Ordering::Relaxed);
     }
@@ -322,23 +322,13 @@ async fn video_loop(
     stats: Arc<Mutex<SendStats>>,
     epoch: Instant,
 ) {
-    let Ok(mut vmx) = VmxCodec::new(VmxConfig {
-        width: cfg.width,
-        height: cfg.height,
-        profile: cfg.profile,
-        color_space: vmx::ColorSpace::Undefined,
-    }) else {
-        return;
-    };
-
     let stride = (cfg.width as usize) * 2;
     let frame_bytes = stride * cfg.height as usize;
-    let mut vmx_buf = vec![0u8; 8 << 20];
     let mut cached: Option<(u64, Vec<u8>)> = None;
     let mut frame_idx = 0u64;
     let mut last_stats = Instant::now();
-    let mut encode_us_acc = 0u64;
-    let mut video_sent = 0u64;
+    let mut last_codec_time = 0i64;
+    let mut last_frames = 0i64;
     let video_interval =
         (cfg.fps_d as i64).saturating_mul(TICKS_PER_SECOND) / cfg.fps_n.max(1) as i64;
     let target_fps = cfg.fps_n as f64 / cfg.fps_d.max(1) as f64;
@@ -366,73 +356,46 @@ async fn video_loop(
 
         let animate = animate_flag.load(Ordering::Relaxed);
         let epoch_n = content_epoch.load(Ordering::Relaxed);
-        let t0 = Instant::now();
-        let payload = if !animate {
+        let uyvy = if !animate {
             if let Some((cached_epoch, data)) = cached.as_ref()
                 && *cached_epoch == epoch_n
             {
                 data.clone()
             } else {
-                let encode_result = tokio::task::block_in_place(|| {
-                    encode_provider_frame(
-                        &provider,
-                        frame_idx,
-                        &mut vmx,
-                        &mut vmx_buf,
-                        frame_bytes,
-                        stride,
-                    )
-                });
-                match encode_result {
-                    Some(p) => {
-                        cached = Some((epoch_n, p.clone()));
-                        p
-                    }
-                    None => {
-                        tokio::time::sleep(Duration::from_millis(5)).await;
-                        continue;
-                    }
-                }
-            }
-        } else {
-            cached = None;
-            let encode_result = tokio::task::block_in_place(|| {
-                encode_provider_frame(
-                    &provider,
-                    frame_idx,
-                    &mut vmx,
-                    &mut vmx_buf,
-                    frame_bytes,
-                    stride,
-                )
-            });
-            match encode_result {
-                Some(p) => p,
-                None => {
+                let frame = provider(frame_idx);
+                if frame.len() != frame_bytes {
                     tokio::time::sleep(Duration::from_millis(5)).await;
                     continue;
                 }
+                cached = Some((epoch_n, frame.clone()));
+                frame
             }
+        } else {
+            cached = None;
+            let frame = provider(frame_idx);
+            if frame.len() != frame_bytes {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                continue;
+            }
+            frame
         };
-        encode_us_acc += t0.elapsed().as_micros() as u64;
 
         let timestamp = (frame_idx as i64).saturating_mul(video_interval);
         let frame = MediaFrame {
             frame_type: FrameType::VIDEO,
             timestamp,
-            codec: Codec::Vmx1 as i32,
+            codec: Codec::Uyvy as i32,
             width: cfg.width,
             height: cfg.height,
+            stride: stride as i32,
             frame_rate_n: cfg.fps_n,
             frame_rate_d: cfg.fps_d,
             aspect_ratio: cfg.width as f32 / cfg.height.max(1) as f32,
             color_space: ColorSpace::Undefined,
-            data: payload,
+            data: uyvy,
             ..Default::default()
         };
-        if tokio::task::block_in_place(|| sender.lock().send_video(frame)).is_ok() {
-            video_sent += 1;
-        }
+        let _ = tokio::task::block_in_place(|| sender.lock().send_video(frame));
         frame_idx += 1;
 
         if last_stats.elapsed() >= STATS_INTERVAL {
@@ -448,13 +411,15 @@ async fn video_loop(
                     )
                 });
             let window = last_stats.elapsed().as_secs_f64().max(0.001);
-            let avg_ms = if video_sent > 0 {
-                (encode_us_acc as f64 / video_sent as f64) / 1000.0
+            let df = (st.frames - last_frames).max(0);
+            let dt = (st.codec_time - last_codec_time).max(0);
+            let avg_ms = if df > 0 {
+                (dt as f64 / df as f64) / 1000.0
             } else {
                 0.0
             };
             let mut snap = stats.lock();
-            snap.video_fps = (video_sent as f64 / window) as f32;
+            snap.video_fps = (df as f64 / window) as f32;
             snap.encode_ms = avg_ms as f32;
             snap.frames = st.frames;
             snap.dropped = st.frames_dropped;
@@ -465,33 +430,12 @@ async fn video_loop(
             snap.video_subscribers = video_subs;
             snap.audio_subscribers = audio_subs;
             snap.bytes_sent = st.bytes_sent;
-            encode_us_acc = 0;
-            video_sent = 0;
+            last_codec_time = st.codec_time;
+            last_frames = st.frames;
             last_stats = Instant::now();
         }
 
         tokio::task::yield_now().await;
-    }
-}
-
-fn encode_provider_frame(
-    provider: &FrameProvider,
-    frame_idx: u64,
-    vmx: &mut VmxCodec,
-    vmx_buf: &mut [u8],
-    frame_bytes: usize,
-    stride: usize,
-) -> Option<Vec<u8>> {
-    let uyvy = provider(frame_idx);
-    if uyvy.len() != frame_bytes {
-        return None;
-    }
-    if vmx.encode_uyvy(&uyvy, stride).is_err() {
-        return None;
-    }
-    match vmx.save_to(vmx_buf) {
-        Ok(n) => Some(vmx_buf[..n].to_vec()),
-        Err(_) => None,
     }
 }
 
