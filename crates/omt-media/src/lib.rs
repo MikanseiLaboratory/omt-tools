@@ -28,4 +28,7 @@ pub use openmediatransport::{
     MetadataFrame, Quality, ReceiverConfig, ReceiverSession, Sender, SenderConfig, SenderInfo,
     SessionState, SessionStatistics, Statistics, bgra_alpha_mask, bgra_to_rgba, bgra_to_rgba_into,
 };
-pub use vmx::{Codec as VmxCodec, Config as VmxConfig, Profile as VmxProfile};
+pub use vmx::{
+    Codec as VmxCodec, Config as VmxConfig, Profile as VmxProfile,
+    SimdCapabilities as VmxSimdCapabilities, SimdPath as VmxSimdPath,
+};

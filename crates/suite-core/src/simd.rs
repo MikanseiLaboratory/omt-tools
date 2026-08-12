@@ -1,14 +1,16 @@
 //! Runtime SIMD capability summary for diagnostics UI.
 //!
-//! Labels mirror the instruction families used by `vmx-rs` / `openmediatransport-rs`
-//! (SSE2 / SSSE3 convert, SSE4.2 FDCT, AVX2+BMI2 codec path, NEON on aarch64).
+//! Labels mirror the instruction families used by `vmx-rs` /
+//! `openmediatransport-rs`. Path selection follows `vmx::SimdCapabilities`
+//! (AVX2+BMI2 → SSE4.2+SSSE3 → NEON → Scalar). UV-width gating for AVX2 is
+//! applied later inside `vmx::Codec` and is not part of this host-only probe.
 
 /// Detected CPU features relevant to the OMT media stack.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SimdCapabilities {
     /// SSE2 (x86_64 color convert).
     pub sse2: bool,
-    /// SSSE3 (x86_64 color convert / swizzle).
+    /// SSSE3 (x86_64 color convert / swizzle; also required for SSE128 codec).
     pub ssse3: bool,
     /// SSE4.2 (x86_64 FDCT path).
     pub sse42: bool,
@@ -69,16 +71,30 @@ impl SimdCapabilities {
         self.avx2 && self.bmi2
     }
 
-    /// Preferred encode/decode SIMD path label (matches `vmx::simd::dispatch`).
+    /// Whether the SSE128 codec path can run (SSE4.2 + SSSE3), matching `vmx`.
+    pub fn sse128_path(&self) -> bool {
+        self.sse42 && self.ssse3
+    }
+
+    /// Preferred encode/decode SIMD path id (same strings as `vmx::SimdPath`).
     pub fn preferred_path_label(&self) -> &'static str {
-        if self.avx2_path() {
-            "AVX2"
-        } else if self.sse42 {
-            "SSE4.2"
-        } else if self.neon {
-            "NEON"
-        } else {
-            "Scalar"
+        #[cfg(target_arch = "x86_64")]
+        {
+            if self.avx2_path() {
+                "avx2"
+            } else if self.sse128_path() {
+                "sse128"
+            } else {
+                "scalar"
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            if self.neon { "neon" } else { "scalar" }
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        {
+            "scalar"
         }
     }
 
@@ -108,7 +124,7 @@ impl SimdCapabilities {
 
     /// Compact one-line summary for stats / settings panels.
     ///
-    /// Example: `SSE2, SSSE3, SSE4.2, AVX2, BMI2 (path: AVX2)`.
+    /// Example: `SSE2, SSSE3, SSE4.2, AVX2, BMI2 (path: avx2)`.
     pub fn summary(&self) -> String {
         let available = self.available_labels();
         let features = if available.is_empty() {
@@ -128,9 +144,11 @@ mod tests {
     fn detect_returns_consistent_path() {
         let caps = SimdCapabilities::detect();
         let path = caps.preferred_path_label();
-        assert!(matches!(path, "AVX2" | "SSE4.2" | "NEON" | "Scalar"));
+        assert!(matches!(path, "avx2" | "sse128" | "neon" | "scalar"));
         if caps.avx2_path() {
-            assert_eq!(path, "AVX2");
+            assert_eq!(path, "avx2");
+        } else if caps.sse128_path() {
+            assert_eq!(path, "sse128");
         }
         let summary = caps.summary();
         assert!(summary.contains("path:"));
