@@ -1,22 +1,22 @@
 //! egui/eframe Studio Monitor application.
 
+mod panels;
+
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use eframe::egui::{
-    self, Color32, Context, CursorIcon, Pos2, Rect, RichText, Sense, TextureHandle, TextureOptions,
-    Ui, Vec2,
-};
+use eframe::egui::{self, Context, Pos2, TextureHandle, TextureOptions};
 use omt_media::{
     AudioLevels, AudioOutputDevice, BufferUnit, ConnectOptions, DelaySetting, DiscoveredSource,
     ReceiveWorker, SessionState, StallState, list_output_devices, spawn_discover,
 };
 use suite_core::{
-    Language, SUITE_VERSION, SimdCapabilities, ThemePreference, install_egui_cjk_fonts,
-    load_config, save_config, t,
+    Language, SUITE_VERSION, SimdCapabilities, StudioMonitorConfig, ThemePreference,
+    install_egui_cjk_fonts, load_config, load_studio_monitor_config, save_config,
+    save_studio_monitor_config, t,
 };
 
 use crate::chrome::UiChrome;
@@ -31,6 +31,13 @@ const ZOOM_MAX: f32 = 8.0;
 const SIDEBAR_W: f32 = 300.0;
 const STATS_W: f32 = 280.0;
 const LOG_H: f32 = 180.0;
+const SIDEBAR_MIN_W: f32 = 200.0;
+const SIDEBAR_MAX_W: f32 = 480.0;
+const STATS_MIN_W: f32 = 200.0;
+const STATS_MAX_W: f32 = 420.0;
+const LOG_MIN_H: f32 = 80.0;
+const LOG_MAX_H: f32 = 360.0;
+const PREVIEW_MIN_W: f32 = 160.0;
 /// Outer inset + gap between chrome panels (sidebar / preview / stats / log).
 const LAYOUT_GAP: f32 = 14.0;
 const TOOLBAR_H: f32 = 48.0;
@@ -129,6 +136,12 @@ struct MonitorApp {
     fullscreen: bool,
     last_theme_dark: Option<bool>,
     simd_summary: String,
+    sidebar_w: f32,
+    stats_w: f32,
+    log_h: f32,
+    stats_video_open: bool,
+    stats_audio_open: bool,
+    stats_source_open: bool,
 }
 
 impl MonitorApp {
@@ -156,6 +169,7 @@ impl MonitorApp {
 
         let suite_version = std::env::var(suite_core::env::SUITE_VERSION)
             .unwrap_or_else(|_| SUITE_VERSION.to_string());
+        let layout = load_studio_monitor_config().unwrap_or_default();
 
         let system_dark = matches!(ctx.system_theme(), Some(egui::Theme::Dark));
         let chrome = UiChrome::resolve(theme, system_dark);
@@ -220,6 +234,12 @@ impl MonitorApp {
             fullscreen: false,
             last_theme_dark: None,
             simd_summary: SimdCapabilities::detect().summary(),
+            sidebar_w: clamp_sidebar_w(layout.sidebar_w as f32),
+            stats_w: clamp_stats_w(layout.stats_w as f32),
+            log_h: clamp_log_h(layout.log_h as f32),
+            stats_video_open: layout.stats_video_open,
+            stats_audio_open: layout.stats_audio_open,
+            stats_source_open: layout.stats_source_open,
         };
         app.buffer_edit.sync_from(
             app.settings.buffer,
@@ -723,6 +743,19 @@ impl MonitorApp {
         let system_dark = matches!(ctx.system_theme(), Some(egui::Theme::Dark));
         UiChrome::resolve(self.theme, system_dark)
     }
+
+    fn persist_monitor_layout(&self) {
+        let cfg = StudioMonitorConfig {
+            schema_version: 1,
+            sidebar_w: clamp_sidebar_w(self.sidebar_w).round() as u32,
+            stats_w: clamp_stats_w(self.stats_w).round() as u32,
+            log_h: clamp_log_h(self.log_h).round() as u32,
+            stats_video_open: self.stats_video_open,
+            stats_audio_open: self.stats_audio_open,
+            stats_source_open: self.stats_source_open,
+        };
+        let _ = save_studio_monitor_config(&cfg);
+    }
 }
 
 impl eframe::App for MonitorApp {
@@ -791,713 +824,23 @@ impl eframe::App for MonitorApp {
     }
 }
 
-impl MonitorApp {
-    fn ui_fullscreen(&mut self, ui: &mut egui::Ui, ctx: &Context, chrome: UiChrome) {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(Color32::BLACK))
-            .show(ui, |ui| {
-                let full = ui.max_rect();
-                self.preview_w = full.width();
-                self.preview_h = full.height();
-
-                let resp = ui.interact(full, ui.id().with("fs-root"), Sense::click());
-                if resp.clicked() || resp.secondary_clicked() {
-                    self.exit_fullscreen(ctx);
-                }
-
-                let has_frame = self.texture.is_some() && self.frame_w > 0 && self.frame_h > 0;
-                if has_frame {
-                    let (dw, dh) = self.fit_display_in_viewport(full.width(), full.height());
-                    let video_rect = Rect::from_center_size(full.center(), Vec2::new(dw, dh));
-                    self.paint_video_stack(ui, chrome, video_rect, full);
-                } else {
-                    ui.painter().text(
-                        full.center(),
-                        egui::Align2::CENTER_CENTER,
-                        t(self.language, "monitor.waiting"),
-                        egui::FontId::proportional(16.0),
-                        chrome.text_muted,
-                    );
-                }
-            });
+fn clamp_sidebar_w(width: f32) -> f32 {
+    if !width.is_finite() || width <= 0.0 {
+        return SIDEBAR_W;
     }
-
-    fn ui_windowed(&mut self, ui: &mut egui::Ui, chrome: UiChrome) {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(chrome.bg))
-            .show(ui, |ui| {
-                let gap = LAYOUT_GAP;
-                let total = ui.available_rect_before_wrap().shrink(gap);
-                let log_h = LOG_H.min(total.height() * 0.35);
-                let top_h = (total.height() - log_h - gap).max(100.0);
-
-                let top = Rect::from_min_size(total.min, Vec2::new(total.width(), top_h));
-                let bottom = Rect::from_min_size(
-                    Pos2::new(total.min.x, total.min.y + top_h + gap),
-                    Vec2::new(total.width(), log_h),
-                );
-
-                let sidebar = Rect::from_min_size(top.min, Vec2::new(SIDEBAR_W, top.height()));
-                let stats = Rect::from_min_max(Pos2::new(top.max.x - STATS_W, top.min.y), top.max);
-                let preview_col = Rect::from_min_max(
-                    Pos2::new(sidebar.max.x + gap, top.min.y),
-                    Pos2::new(stats.min.x - gap, top.max.y),
-                );
-                let toolbar =
-                    Rect::from_min_size(preview_col.min, Vec2::new(preview_col.width(), TOOLBAR_H));
-                let picture = Rect::from_min_max(
-                    Pos2::new(preview_col.min.x, preview_col.min.y + TOOLBAR_H + gap),
-                    preview_col.max,
-                );
-
-                // Layer 0 (bottom): video picture only — clipped so it never covers chrome.
-                self.paint_picture_layer(ui, chrome, picture);
-
-                // Layer 1+: chrome panels on top of video.
-                ui.scope_builder(egui::UiBuilder::new().max_rect(sidebar), |ui| {
-                    self.ui_sidebar(ui, chrome);
-                });
-                ui.scope_builder(egui::UiBuilder::new().max_rect(toolbar), |ui| {
-                    self.ui_preview_toolbar(ui, chrome);
-                });
-                ui.scope_builder(egui::UiBuilder::new().max_rect(stats), |ui| {
-                    self.ui_stats(ui, chrome);
-                });
-                ui.scope_builder(egui::UiBuilder::new().max_rect(bottom), |ui| {
-                    self.ui_log(ui, chrome);
-                });
-            });
-    }
-
-    fn paint_picture_layer(&mut self, ui: &mut Ui, chrome: UiChrome, picture: Rect) {
-        // Card chrome so the gap against neighboring panels is visible.
-        let radius = 6.0;
-        ui.painter().rect_filled(picture, radius, chrome.panel);
-        ui.painter().rect_stroke(
-            picture,
-            radius,
-            egui::Stroke::new(1.0, chrome.border),
-            egui::StrokeKind::Inside,
-        );
-        // Inset the interactive / video region so content isn't flush to the card edge.
-        let inset = 8.0;
-        let content = picture.shrink(inset);
-        self.preview_w = content.width();
-        self.preview_h = content.height();
-
-        let resp = ui.interact(content, ui.id().with("preview"), Sense::click_and_drag());
-        if resp.double_clicked() {
-            self.enter_fullscreen(ui.ctx());
-        }
-        if resp.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll.abs() > f32::EPSILON {
-                self.adjust_zoom(scroll);
-            }
-        }
-
-        let middle_down = ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle));
-        if middle_down {
-            if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
-                if let Some(prev) = self.pan_drag {
-                    self.pan_x += pos.x - prev.x;
-                    self.pan_y += pos.y - prev.y;
-                }
-                self.pan_drag = Some(pos);
-                ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-            }
-        } else {
-            self.pan_drag = None;
-        }
-
-        let has_frame = self.texture.is_some() && self.frame_w > 0 && self.frame_h > 0;
-        if has_frame {
-            let (dw, dh) = self.display_size();
-            let origin = content.min + Vec2::new(self.pan_x, self.pan_y);
-            let video_rect = Rect::from_min_size(origin, Vec2::new(dw, dh));
-            self.paint_video_stack(ui, chrome, video_rect, content);
-        } else {
-            ui.painter().text(
-                content.center(),
-                egui::Align2::CENTER_CENTER,
-                t(self.language, "monitor.waiting"),
-                egui::FontId::proportional(16.0),
-                chrome.text_muted,
-            );
-        }
-    }
-
-    fn ui_preview_toolbar(&mut self, ui: &mut Ui, chrome: UiChrome) {
-        egui::Frame::NONE
-            .fill(chrome.panel)
-            .stroke(egui::Stroke::new(1.0, chrome.border))
-            .corner_radius(6.0)
-            .inner_margin(egui::Margin::symmetric(16, 12))
-            .show(ui, |ui| {
-                ui.set_min_size(ui.available_size());
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 12.0;
-                    ui.label(RichText::new(&self.stall_text).color(chrome.text));
-                    ui.label(
-                        RichText::new(format!("{:.0}%", self.zoom * 100.0)).color(chrome.text),
-                    );
-                    if chip(ui, chrome, t(self.language, "monitor.zoom_reset"), false) {
-                        self.zoom_reset();
-                    }
-                    if chip(ui, chrome, t(self.language, "monitor.fullscreen"), false) {
-                        self.enter_fullscreen(ui.ctx());
-                    }
-                    if chip(ui, chrome, t(self.language, "monitor.preferences"), false) {
-                        self.open_preferences();
-                    }
-                    ui.label(
-                        RichText::new(
-                            "wheel = zoom · middle-drag = pan · F11 / double-click = fullscreen",
-                        )
-                        .small()
-                        .color(chrome.text_muted),
-                    );
-                });
-            });
-    }
-
-    fn ui_sidebar(&mut self, ui: &mut Ui, chrome: UiChrome) {
-        egui::Frame::NONE
-            .fill(chrome.panel)
-            .stroke(egui::Stroke::new(1.0, chrome.border))
-            .corner_radius(6.0)
-            .inner_margin(egui::Margin::symmetric(14, 14))
-            .show(ui, |ui| {
-                ui.set_min_size(ui.available_size());
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(t(self.language, "monitor.sources"))
-                            .strong()
-                            .color(chrome.text),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if chip(ui, chrome, t(self.language, "monitor.refresh"), false) {
-                            self.request_refresh(false);
-                        }
-                    });
-                });
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                egui::ScrollArea::vertical()
-                    .id_salt("monitor_sources")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let none_sel = self.selected.is_none();
-                        if source_row(ui, chrome, t(self.language, "monitor.none"), "", none_sel) {
-                            self.disconnect_source();
-                        }
-
-                        if self.discovered.is_empty() {
-                            ui.add_space(12.0);
-                            ui.label(
-                                RichText::new(t(self.language, "monitor.no_sources"))
-                                    .color(chrome.text_muted)
-                                    .small(),
-                            );
-                        } else {
-                            let mut hosts: Vec<(String, Vec<DiscoveredSource>)> = Vec::new();
-                            for s in &self.discovered {
-                                if let Some((_, list)) =
-                                    hosts.iter_mut().find(|(h, _)| h == &s.host)
-                                {
-                                    list.push(s.clone());
-                                } else {
-                                    hosts.push((s.host.clone(), vec![s.clone()]));
-                                }
-                            }
-                            for (host, sources) in hosts {
-                                ui.add_space(16.0);
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(host.to_uppercase())
-                                            .size(11.0)
-                                            .strong()
-                                            .color(chrome.text_muted),
-                                    );
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new(format!("{}", sources.len()))
-                                                    .size(11.0)
-                                                    .color(chrome.text_muted),
-                                            );
-                                        },
-                                    );
-                                });
-                                ui.add_space(8.0);
-                                for s in sources {
-                                    let label = if s.source.is_empty() {
-                                        s.name.clone()
-                                    } else {
-                                        s.source.clone()
-                                    };
-                                    let selected = self.selected.as_deref() == Some(s.url.as_str());
-                                    if source_row(
-                                        ui,
-                                        chrome,
-                                        &label,
-                                        &format!(":{}", s.port),
-                                        selected,
-                                    ) {
-                                        self.select(s.url.clone(), s.addresses.clone());
-                                    }
-                                }
-                            }
-                        }
-                        ui.add_space(12.0);
-                    });
-
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    ui.add_space(12.0);
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new(t(self.language, "monitor.preferences"))
-                                    .color(chrome.text),
-                            )
-                            .fill(chrome.surface)
-                            .corner_radius(6.0)
-                            .min_size(Vec2::new(ui.available_width(), 36.0)),
-                        )
-                        .clicked()
-                    {
-                        self.open_preferences();
-                    }
-                    ui.add_space(10.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-                });
-            });
-    }
-
-    fn paint_video_stack(&mut self, ui: &mut Ui, _chrome: UiChrome, video_rect: Rect, clip: Rect) {
-        let Some(tex) = &self.texture else {
-            return;
-        };
-        if self.frame_w == 0 || self.frame_h == 0 {
-            return;
-        }
-        let painter = ui.painter().with_clip_rect(clip);
-        painter.image(
-            tex.id(),
-            video_rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-            Color32::WHITE,
-        );
-        if self.settings.safe_area {
-            paint_safe_area_clipped(ui, video_rect, clip);
-        }
-        if self.settings.vu_meter {
-            paint_vu_clipped(ui, video_rect, clip, self.audio_levels);
-        }
-    }
-
-    fn ui_stats(&mut self, ui: &mut Ui, chrome: UiChrome) {
-        egui::Frame::NONE
-            .fill(chrome.panel)
-            .stroke(egui::Stroke::new(1.0, chrome.border))
-            .corner_radius(6.0)
-            .inner_margin(egui::Margin::symmetric(16, 14))
-            .show(ui, |ui| {
-                ui.set_min_size(ui.available_size());
-                egui::ScrollArea::vertical()
-                    .id_salt("monitor_stats")
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 10.0;
-                        let source_fps = if self.fps_d > 0 {
-                            self.fps_n as f32 / self.fps_d as f32
-                        } else {
-                            0.0
-                        };
-                        let buffer_label = format_buffer_stats(
-                            self.language,
-                            &self.settings.buffer,
-                            self.video_buffer_delay_ms,
-                            self.audio_buffer_delay_ms,
-                            self.buffer_fps().0,
-                            self.buffer_fps().1,
-                        );
-
-                        ui.label(
-                            RichText::new(t(self.language, "monitor.stats"))
-                                .strong()
-                                .color(chrome.text),
-                        );
-                        stat_row(
-                            ui,
-                            chrome,
-                            "Display FPS",
-                            format!("{:.1}", self.display_fps),
-                        );
-                        stat_row(ui, chrome, "Source FPS", format!("{source_fps:.2}"));
-                        stat_row(
-                            ui,
-                            chrome,
-                            "Presented",
-                            format!("{}", self.frames_presented),
-                        );
-                        stat_row(
-                            ui,
-                            chrome,
-                            "Source dropped",
-                            format!("{}", self.source_dropped),
-                        );
-                        stat_row(
-                            ui,
-                            chrome,
-                            "Render skipped",
-                            format!("{}", self.frames_render_skipped),
-                        );
-                        stat_row(ui, chrome, "Net dropped", format!("{}", self.net_dropped));
-                        stat_row(ui, chrome, "Decoded", format!("{}", self.frames_decoded));
-                        stat_row(
-                            ui,
-                            chrome,
-                            "Decode ms",
-                            format!(
-                                "{:.2} (peak {:.2})",
-                                self.decode_ms_avg, self.decode_ms_peak
-                            ),
-                        );
-                        stat_row(
-                            ui,
-                            chrome,
-                            "Wire queue",
-                            format!("{}", self.wire_queue_depth),
-                        );
-                        stat_row(ui, chrome, "Reconnects", format!("{}", self.reconnects));
-                        stat_row(ui, chrome, "Session", format!("{:?}", self.session_state));
-
-                        ui.add_space(8.0);
-                        ui.label(
-                            RichText::new(t(self.language, "monitor.audio"))
-                                .strong()
-                                .color(chrome.text),
-                        );
-                        stat_row(
-                            ui,
-                            chrome,
-                            "Audio packets",
-                            format!("{}", self.audio_frames),
-                        );
-                        stat_row(ui, chrome, "L", format_dbfs(self.audio_levels.peak_l));
-                        stat_row(ui, chrome, "R", format_dbfs(self.audio_levels.peak_r));
-                        stat_row(
-                            ui,
-                            chrome,
-                            "Format",
-                            if self.audio_levels.sample_rate > 0 {
-                                format!(
-                                    "{} Hz / {} ch",
-                                    self.audio_levels.sample_rate, self.audio_levels.channels
-                                )
-                            } else {
-                                "-".into()
-                            },
-                        );
-                        stat_row(
-                            ui,
-                            chrome,
-                            t(self.language, "monitor.av_buffer"),
-                            buffer_label,
-                        );
-
-                        ui.add_space(8.0);
-                        ui.label(
-                            RichText::new(t(self.language, "monitor.source_info"))
-                                .strong()
-                                .color(chrome.text),
-                        );
-                        stat_row(
-                            ui,
-                            chrome,
-                            "Resolution",
-                            if self.frame_w > 0 {
-                                format!("{}×{}", self.frame_w, self.frame_h)
-                            } else {
-                                "-".into()
-                            },
-                        );
-                        stat_row(ui, chrome, "Bitrate", format_bitrate(self.bitrate_bps));
-                        stat_row(ui, chrome, "Bytes RX", format_bytes(self.bytes_received));
-                        stat_row(
-                            ui,
-                            chrome,
-                            "URL",
-                            self.selected.clone().unwrap_or_else(|| "-".into()),
-                        );
-                        ui.add_space(8.0);
-                        stat_row(
-                            ui,
-                            chrome,
-                            t(self.language, "simd"),
-                            self.simd_summary.clone(),
-                        );
-                    });
-            });
-    }
-
-    fn ui_log(&mut self, ui: &mut Ui, chrome: UiChrome) {
-        egui::Frame::NONE
-            .fill(chrome.panel)
-            .stroke(egui::Stroke::new(1.0, chrome.border))
-            .corner_radius(6.0)
-            .inner_margin(egui::Margin::symmetric(14, 12))
-            .show(ui, |ui| {
-                ui.set_min_size(ui.available_size());
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(t(self.language, "monitor.log"))
-                            .strong()
-                            .color(chrome.text),
-                    );
-                    ui.add_space(8.0);
-                    if chip(ui, chrome, t(self.language, "monitor.clear_log"), false) {
-                        self.log_lines.clear();
-                    }
-                });
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(8.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("monitor_log")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        if self.log_lines.is_empty() {
-                            ui.label(
-                                RichText::new("XML / metadata will appear here")
-                                    .color(chrome.text_muted)
-                                    .italics()
-                                    .small(),
-                            );
-                        } else {
-                            for line in &self.log_lines {
-                                ui.monospace(RichText::new(line).color(chrome.text_muted).small());
-                            }
-                        }
-                    });
-            });
-    }
+    width.clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W)
 }
 
-fn chip(ui: &mut Ui, chrome: UiChrome, label: &str, active: bool) -> bool {
-    let fill = if active {
-        chrome.accent_soft
-    } else {
-        chrome.surface
-    };
-    let text = if active { chrome.accent } else { chrome.text };
-    ui.add(
-        egui::Button::new(RichText::new(label).color(text).size(12.0))
-            .fill(fill)
-            .corner_radius(4.0),
-    )
-    .clicked()
-}
-
-fn source_row(ui: &mut Ui, chrome: UiChrome, title: &str, subtitle: &str, selected: bool) -> bool {
-    let fill = if selected {
-        chrome.accent_soft
-    } else {
-        chrome.surface
-    };
-    let stroke = if selected {
-        chrome.accent
-    } else {
-        chrome.border
-    };
-    let title_color = if selected { chrome.accent } else { chrome.text };
-
-    let frame = egui::Frame::NONE
-        .fill(fill)
-        .stroke(egui::Stroke::new(1.0, stroke))
-        .corner_radius(8.0)
-        .inner_margin(egui::Margin::symmetric(14, 12));
-
-    let inner = frame.show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            // Selection dot
-            let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
-            ui.painter().circle_filled(
-                dot_rect.center(),
-                3.5,
-                if selected {
-                    chrome.accent
-                } else {
-                    chrome.text_muted
-                },
-            );
-            ui.add_space(10.0);
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 4.0;
-                ui.label(RichText::new(title).size(13.0).strong().color(title_color));
-                if !subtitle.is_empty() {
-                    ui.label(RichText::new(subtitle).size(11.0).color(chrome.text_muted));
-                }
-            });
-        });
-    });
-
-    ui.add_space(10.0);
-    inner.response.interact(Sense::click()).clicked()
-}
-
-fn stat_row(ui: &mut Ui, chrome: UiChrome, label: &str, value: String) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(label).small().color(chrome.text_muted));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(value).small().strong().color(chrome.text));
-        });
-    });
-}
-
-fn paint_safe_area_clipped(ui: &mut Ui, video_rect: Rect, clip: Rect) {
-    let painter = ui.painter().with_clip_rect(clip);
-    for (frac, color) in [
-        (ACTION_SAFE_FRAC, Color32::from_rgb(0xff, 0xff, 0xff)),
-        (TITLE_SAFE_FRAC, Color32::from_rgb(0xff, 0xeb, 0x3b)),
-    ] {
-        let w = video_rect.width() * frac;
-        let h = video_rect.height() * frac;
-        let r = Rect::from_center_size(video_rect.center(), Vec2::new(w, h));
-        painter.rect_stroke(
-            r,
-            0.0,
-            egui::Stroke::new(1.0, color),
-            egui::StrokeKind::Outside,
-        );
+fn clamp_stats_w(width: f32) -> f32 {
+    if !width.is_finite() || width <= 0.0 {
+        return STATS_W;
     }
+    width.clamp(STATS_MIN_W, STATS_MAX_W)
 }
 
-fn paint_vu_clipped(ui: &mut Ui, video_rect: Rect, clip: Rect, levels: AudioLevels) {
-    let painter = ui.painter().with_clip_rect(clip);
-    let bar_w = 10.0f32;
-    let gap = 4.0f32;
-    let height = video_rect.height() * 0.6;
-    let top = video_rect.min.y + (video_rect.height() - height) * 0.5;
-    let left = video_rect.max.x - bar_w * 2.0 - gap - 12.0;
-    let l = peak_to_meter(levels.peak_l);
-    let r = peak_to_meter(levels.peak_r);
-    paint_vu_bar_painter(&painter, Pos2::new(left, top), bar_w, height, l);
-    paint_vu_bar_painter(
-        &painter,
-        Pos2::new(left + bar_w + gap, top),
-        bar_w,
-        height,
-        r,
-    );
-}
-
-fn paint_vu_bar_painter(
-    painter: &egui::Painter,
-    origin: Pos2,
-    width: f32,
-    full_h: f32,
-    level: f32,
-) {
-    let bg = Rect::from_min_size(origin, Vec2::new(width, full_h));
-    painter.rect_filled(bg, 2.0, Color32::from_rgb(0x1b, 0x22, 0x2c));
-    let h = (full_h * level).max(2.0);
-    let db = -60.0 + level * 60.0;
-    let color = if db > -3.0 {
-        Color32::from_rgb(0xf4, 0x43, 0x36)
-    } else if db > -9.0 {
-        Color32::from_rgb(0xff, 0xeb, 0x3b)
-    } else {
-        Color32::from_rgb(0x4c, 0xaf, 0x50)
-    };
-    let fill = Rect::from_min_max(
-        Pos2::new(origin.x, origin.y + full_h - h),
-        Pos2::new(origin.x + width, origin.y + full_h),
-    );
-    painter.rect_filled(fill, 2.0, color);
-}
-
-fn peak_to_meter(peak: f32) -> f32 {
-    const FLOOR_DB: f32 = -60.0;
-    if peak <= 1e-6 {
-        return 0.0;
+fn clamp_log_h(height: f32) -> f32 {
+    if !height.is_finite() || height <= 0.0 {
+        return LOG_H;
     }
-    let db = (20.0 * peak.log10()).clamp(FLOOR_DB, 0.0);
-    ((db - FLOOR_DB) / -FLOOR_DB).clamp(0.0, 1.0)
-}
-
-fn format_dbfs(peak: f32) -> String {
-    if peak <= 1e-6 {
-        "-∞ dBFS".into()
-    } else {
-        format!("{:.1} dBFS", 20.0 * peak.log10())
-    }
-}
-
-fn format_bitrate(bps: f64) -> String {
-    if bps >= 1_000_000.0 {
-        format!("{:.2} Mbps", bps / 1_000_000.0)
-    } else if bps >= 1_000.0 {
-        format!("{:.1} kbps", bps / 1_000.0)
-    } else {
-        format!("{bps:.0} bps")
-    }
-}
-
-fn format_bytes(bytes: i64) -> String {
-    let b = bytes.max(0) as f64;
-    if b >= 1_000_000_000.0 {
-        format!("{:.2} GB", b / 1_000_000_000.0)
-    } else if b >= 1_000_000.0 {
-        format!("{:.2} MB", b / 1_000_000.0)
-    } else if b >= 1_000.0 {
-        format!("{:.1} KB", b / 1_000.0)
-    } else {
-        format!("{b:.0} B")
-    }
-}
-
-fn format_video_delay_frames(
-    language: Language,
-    buffer: &omt_media::BufferSettings,
-    video_ms: u32,
-    fps_n: i32,
-    fps_d: i32,
-) -> String {
-    let frames = match buffer.video.unit {
-        BufferUnit::Frames => buffer.video.amount,
-        BufferUnit::Milliseconds => crate::preferences::ms_to_frames(video_ms, fps_n, fps_d),
-    };
-    let unit = if frames == 1 {
-        t(language, "monitor.buffer_frame")
-    } else {
-        t(language, "monitor.buffer_frames")
-    };
-    format!(
-        "{frames} {unit} ({}{video_ms} ms)",
-        t(language, "monitor.buffer_equiv")
-    )
-}
-
-fn format_buffer_stats(
-    language: Language,
-    buffer: &omt_media::BufferSettings,
-    video_ms: u32,
-    audio_ms: u32,
-    fps_n: i32,
-    fps_d: i32,
-) -> String {
-    let v = format_video_delay_frames(language, buffer, video_ms, fps_n, fps_d);
-    let a = format!("{audio_ms} ms");
-    if buffer.linked {
-        format!("link · V {v} / A {a}")
-    } else {
-        format!("indep · V {v} / A {a}")
-    }
+    height.clamp(LOG_MIN_H, LOG_MAX_H)
 }

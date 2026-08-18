@@ -46,6 +46,26 @@ impl Default for SuiteConfig {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_side_panel_w() -> u32 {
+    360
+}
+
+fn default_sidebar_w() -> u32 {
+    300
+}
+
+fn default_stats_w() -> u32 {
+    280
+}
+
+fn default_log_h() -> u32 {
+    180
+}
+
 /// Test Patterns tool preferences (`test-patterns.json`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -56,6 +76,15 @@ pub struct TestPatternsConfig {
     pub custom_images: Vec<PathBuf>,
     /// Prefetched video frames for paced OMT send (1..=16, default 3).
     pub frame_buffer_frames: u32,
+    /// Right side-panel width in logical pixels.
+    #[serde(default = "default_side_panel_w")]
+    pub side_panel_w: u32,
+    /// Whether the statistics group is expanded.
+    #[serde(default = "default_true")]
+    pub stats_open: bool,
+    /// Whether the settings group is expanded.
+    #[serde(default = "default_true")]
+    pub settings_open: bool,
 }
 
 impl Default for TestPatternsConfig {
@@ -64,6 +93,9 @@ impl Default for TestPatternsConfig {
             schema_version: 1,
             custom_images: Vec::new(),
             frame_buffer_frames: 3,
+            side_panel_w: default_side_panel_w(),
+            stats_open: true,
+            settings_open: true,
         }
     }
 }
@@ -74,11 +106,37 @@ impl Default for TestPatternsConfig {
 pub struct StudioMonitorConfig {
     /// Schema version.
     pub schema_version: u32,
+    /// Left sources sidebar width in logical pixels.
+    #[serde(default = "default_sidebar_w")]
+    pub sidebar_w: u32,
+    /// Right statistics panel width in logical pixels.
+    #[serde(default = "default_stats_w")]
+    pub stats_w: u32,
+    /// Bottom log panel height in logical pixels.
+    #[serde(default = "default_log_h")]
+    pub log_h: u32,
+    /// Whether the video statistics group is expanded.
+    #[serde(default = "default_true")]
+    pub stats_video_open: bool,
+    /// Whether the audio statistics group is expanded.
+    #[serde(default = "default_true")]
+    pub stats_audio_open: bool,
+    /// Whether the source-info group is expanded.
+    #[serde(default = "default_true")]
+    pub stats_source_open: bool,
 }
 
 impl Default for StudioMonitorConfig {
     fn default() -> Self {
-        Self { schema_version: 1 }
+        Self {
+            schema_version: 1,
+            sidebar_w: default_sidebar_w(),
+            stats_w: default_stats_w(),
+            log_h: default_log_h(),
+            stats_video_open: true,
+            stats_audio_open: true,
+            stats_source_open: true,
+        }
     }
 }
 
@@ -188,6 +246,7 @@ mod tests {
             schema_version: 1,
             custom_images: vec![PathBuf::from("C:/images/bars.png")],
             frame_buffer_frames: 5,
+            ..Default::default()
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let parsed: TestPatternsConfig = serde_json::from_str(&json).unwrap();
@@ -201,6 +260,20 @@ mod tests {
         let parsed: TestPatternsConfig =
             serde_json::from_str(r#"{"schema_version":1,"custom_images":[]}"#).unwrap();
         assert_eq!(parsed.frame_buffer_frames, 3);
+        assert_eq!(parsed.side_panel_w, 360);
+        assert!(parsed.stats_open);
+        assert!(parsed.settings_open);
+    }
+
+    #[test]
+    fn legacy_studio_monitor_json_defaults_layout() {
+        let parsed: StudioMonitorConfig = serde_json::from_str(r#"{"schema_version":1}"#).unwrap();
+        assert_eq!(parsed.sidebar_w, 300);
+        assert_eq!(parsed.stats_w, 280);
+        assert_eq!(parsed.log_h, 180);
+        assert!(parsed.stats_video_open);
+        assert!(parsed.stats_audio_open);
+        assert!(parsed.stats_source_open);
     }
 
     #[test]
