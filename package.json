@@ -5,7 +5,6 @@
   "packageManager": "bun@1.2.19",
   "scripts": {
     "dev": "bun run --cwd apps/launcher dev",
-    "dev:frontend": "bun run --cwd apps/launcher dev:frontend",
     "build": "bun run --cwd apps/launcher build",
     "tauri": "bun run --cwd apps/launcher tauri",
     "tools:build": "cargo build -p omt-studio-monitor -p omt-test-patterns",
