@@ -1104,7 +1104,14 @@ impl PatternsView {
                 src.as_ref().clone()
             } else {
                 let mut buf = vec![0u8; (PREVIEW_W as usize) * 2 * (PREVIEW_H as usize)];
-                scroll_uyvy(src.as_ref(), &mut buf, PREVIEW_W, PREVIEW_H, phase_x, phase_y);
+                scroll_uyvy(
+                    src.as_ref(),
+                    &mut buf,
+                    PREVIEW_W,
+                    PREVIEW_H,
+                    phase_x,
+                    phase_y,
+                );
                 buf
             }
         } else {
