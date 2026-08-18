@@ -1181,3 +1181,20 @@ impl Render for PatternsView {
         root
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anim_speed_change_does_not_jump_phase() {
+        let start = 0.42;
+        let next_slow = advance_scroll_phase(start, 50.0);
+        let next_fast = advance_scroll_phase(start, 200.0);
+        let delta_slow = (next_slow - start).rem_euclid(1.0);
+        let delta_fast = (next_fast - start).rem_euclid(1.0);
+        assert!(delta_fast > delta_slow);
+        assert!(delta_fast < 0.02);
+        assert!((next_slow - start).abs() < 0.01);
+    }
+}

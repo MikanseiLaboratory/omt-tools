@@ -89,6 +89,7 @@ pub(crate) fn stats_block(
         .children(error.map(|e| div().text_xs().text_color(rgb(0xff6b6b)).child(e)))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn settings_block(
     cx: &mut Context<PatternsView>,
     language: Language,
@@ -1093,21 +1094,4 @@ pub(crate) fn stat_row(label: &str, value: String) -> impl IntoElement {
                 .text_right()
                 .child(value),
         )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    pub(crate) fn anim_speed_change_does_not_jump_phase() {
-        let start = 0.42;
-        let next_slow = advance_scroll_phase(start, 50.0);
-        let next_fast = advance_scroll_phase(start, 200.0);
-        let delta_slow = (next_slow - start).rem_euclid(1.0);
-        let delta_fast = (next_fast - start).rem_euclid(1.0);
-        assert!(delta_fast > delta_slow);
-        assert!(delta_fast < 0.02);
-        assert!((next_slow - start).abs() < 0.01);
-    }
 }
