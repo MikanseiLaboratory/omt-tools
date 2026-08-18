@@ -234,6 +234,44 @@ impl Default for LauncherConfig {
     }
 }
 
+/// Discovery Server GUI preferences (`discovery-server.json`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiscoveryServerConfig {
+    /// Schema version.
+    pub schema_version: u32,
+    /// Listen address (`::` = dual-stack any, matching the official app).
+    pub bind: String,
+    /// Listen port (default 6399).
+    pub port: u16,
+}
+
+impl Default for DiscoveryServerConfig {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            bind: "::".into(),
+            port: 6399,
+        }
+    }
+}
+
+impl DiscoveryServerConfig {
+    /// Clamp bind/port into values the GUI and CLI accept.
+    pub fn sanitized(mut self) -> Self {
+        let trimmed = self.bind.trim();
+        self.bind = if trimmed.is_empty() {
+            "::".into()
+        } else {
+            trimmed.to_string()
+        };
+        if self.port == 0 {
+            self.port = 6399;
+        }
+        self
+    }
+}
+
 /// Resolve the suite config directory.
 pub fn config_dir() -> Result<PathBuf, ConfigError> {
     let dirs = ProjectDirs::from("lab", "Mikansei", "OMT Tools").ok_or(ConfigError::NoConfigDir)?;
@@ -288,6 +326,16 @@ pub fn load_launcher_config() -> Result<LauncherConfig, ConfigError> {
 /// Persist Launcher preferences.
 pub fn save_launcher_config(cfg: &LauncherConfig) -> Result<(), ConfigError> {
     save_json_file(&app_config_path("launcher")?, cfg)
+}
+
+/// Load Discovery Server GUI preferences.
+pub fn load_discovery_server_config() -> Result<DiscoveryServerConfig, ConfigError> {
+    load_json_file(&app_config_path("discovery-server")?)
+}
+
+/// Persist Discovery Server GUI preferences.
+pub fn save_discovery_server_config(cfg: &DiscoveryServerConfig) -> Result<(), ConfigError> {
+    save_json_file(&app_config_path("discovery-server")?, cfg)
 }
 
 fn load_json_file<T: DeserializeOwned + Default>(path: &Path) -> Result<T, ConfigError> {
@@ -438,5 +486,21 @@ mod tests {
             app_config_path("launcher").unwrap(),
             dir.join("launcher.json")
         );
+        assert_eq!(
+            app_config_path("discovery-server").unwrap(),
+            dir.join("discovery-server.json")
+        );
+    }
+
+    #[test]
+    fn sanitizes_discovery_server_bind_and_port() {
+        let parsed = DiscoveryServerConfig {
+            bind: "  ".into(),
+            port: 0,
+            ..Default::default()
+        }
+        .sanitized();
+        assert_eq!(parsed.bind, "::");
+        assert_eq!(parsed.port, 6399);
     }
 }

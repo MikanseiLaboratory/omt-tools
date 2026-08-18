@@ -1,0 +1,19 @@
+[package]
+name = "omt-config-manager"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "OMT Config Manager — edit settings.xml (GPUI)"
+
+[[bin]]
+name = "omt-config-manager"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+gpui.workspace = true
+openmediatransport.workspace = true
+suite-core.workspace = true

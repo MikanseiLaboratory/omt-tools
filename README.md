@@ -11,9 +11,11 @@ Open Media Transport production utilities inspired by NDI Tools.
 
 | Tool | Description |
 |------|-------------|
-| Studio Monitor |  Discover and view OMT sources on the LAN |
-| Test Patterns |  Send SMPTE-style patterns + tone over OMT |
-| Screen Capture |  Windows Graphics Capture / ScreenCaptureKit (WIP) |
+| Studio Monitor | Discover and view OMT sources on the LAN |
+| Test Patterns | Send SMPTE-style patterns + tone over OMT |
+| Config Manager | View and edit the global OMT `settings.xml` |
+| Discovery Server | GUI + CLI TCP discovery server (port 6399) |
+| Screen Capture | Windows Graphics Capture / ScreenCaptureKit (WIP) |
 
 Runtime media stack: [`MikanseiLaboratory/openmediatransport-rs`](https://github.com/MikanseiLaboratory/openmediatransport-rs) + [`MikanseiLaboratory/vmx-rs`](https://github.com/MikanseiLaboratory/vmx-rs)
 (VMX SIMD path reporting via `simd_path()`: `avx2` / `sse128` / `neon` / `scalar`).

@@ -7,11 +7,14 @@
     "dev": "bun run --cwd apps/launcher dev",
     "build": "bun run --cwd apps/launcher build",
     "tauri": "bun run --cwd apps/launcher tauri",
-    "tools:build": "cargo build -p omt-studio-monitor -p omt-test-patterns",
-    "tools:build:release": "cargo build --release -p omt-studio-monitor -p omt-test-patterns",
+    "tools:build": "cargo build -p omt-studio-monitor -p omt-test-patterns -p omt-config-manager -p omt-discovery-server",
+    "tools:build:release": "cargo build --release -p omt-studio-monitor -p omt-test-patterns -p omt-config-manager -p omt-discovery-server",
     "tools:run:studio-monitor": "cargo run -p omt-studio-monitor",
     "tools:run:studio-monitor:release": "cargo run --release -p omt-studio-monitor",
     "tools:run:test-patterns": "cargo run -p omt-test-patterns",
-    "tools:run:test-patterns:release": "cargo run --release -p omt-test-patterns"
+    "tools:run:test-patterns:release": "cargo run --release -p omt-test-patterns",
+    "tools:run:config-manager": "cargo run -p omt-config-manager",
+    "tools:run:discovery-server": "cargo run -p omt-discovery-server --bin omt-discovery-server",
+    "tools:run:discovery-server-gui": "cargo run -p omt-discovery-server --bin omt-discovery-server-gui"
   }
 }

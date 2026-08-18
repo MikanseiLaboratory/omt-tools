@@ -6,3 +6,6 @@ Required names:
 
 - `omt-studio-monitor-<triple>`
 - `omt-test-patterns-<triple>`
+- `omt-config-manager-<triple>`
+- `omt-discovery-server-gui-<triple>`
+- `omt-discovery-server-<triple>`

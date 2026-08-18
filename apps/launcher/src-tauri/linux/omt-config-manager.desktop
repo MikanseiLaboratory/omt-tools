@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OMT Config Manager
+Comment=View and edit the global OMT settings.xml
+Exec=omt-config-manager
+TryExec=omt-config-manager
+Icon=OMT Tools
+Terminal=false
+StartupNotify=true
+StartupWMClass=omt-config-manager
+Categories=AudioVideo;Video;AudioVideoEditing;
+Keywords=OMT;NDI;settings;config;

@@ -11,6 +11,8 @@ pub fn parse_tool_id(tool_id: &str) -> Result<ToolId, String> {
     match tool_id {
         "studio-monitor" => Ok(ToolId::StudioMonitor),
         "test-patterns" => Ok(ToolId::TestPatterns),
+        "config-manager" => Ok(ToolId::ConfigManager),
+        "discovery-server" => Ok(ToolId::DiscoveryServer),
         "screen-capture" => Ok(ToolId::ScreenCapture),
         _ => Err(format!("unknown tool: {tool_id}")),
     }

@@ -111,6 +111,20 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::Japanese, "tool.screen_capture.desc") => {
             "デスクトップをキャプチャしてOMT送出（プレビュー）"
         }
+        (Language::English, "tool.config_manager") => "Config Manager",
+        (Language::Japanese, "tool.config_manager") => "Config Manager",
+        (Language::English, "tool.config_manager.desc") => {
+            "View and edit the global OMT settings.xml"
+        }
+        (Language::Japanese, "tool.config_manager.desc") => "OMT全体の settings.xml を表示・編集",
+        (Language::English, "tool.discovery_server") => "Discovery Server",
+        (Language::Japanese, "tool.discovery_server") => "Discovery Server",
+        (Language::English, "tool.discovery_server.desc") => {
+            "Run an OMT discovery server for networks that block multicast"
+        }
+        (Language::Japanese, "tool.discovery_server.desc") => {
+            "マルチキャストが使えないネットワーク向けのOMT Discovery Server"
+        }
         (Language::English, "tool.unavailable") => "Not installed",
         (Language::Japanese, "tool.unavailable") => "未インストール",
 
@@ -336,6 +350,68 @@ pub fn t(lang: Language, key: &str) -> &'static str {
             "目標FPSを維持できません — 品質を下げてください"
         }
 
+        // Config Manager
+        (Language::English, "config.path") => "File",
+        (Language::Japanese, "config.path") => "ファイル",
+        (Language::English, "config.reload") => "Reload",
+        (Language::Japanese, "config.reload") => "再読込",
+        (Language::English, "config.reveal") => "Show in folder",
+        (Language::Japanese, "config.reveal") => "フォルダーで表示",
+        (Language::English, "config.discovery") => "Discovery Server",
+        (Language::Japanese, "config.discovery") => "Discovery Server",
+        (Language::English, "config.discovery_hint") => {
+            "omt://host:port — leave empty to use DNS-SD"
+        }
+        (Language::Japanese, "config.discovery_hint") => "omt://host:port — 空欄で DNS-SD を使用",
+        (Language::English, "config.clear_discovery") => "Use DNS-SD",
+        (Language::Japanese, "config.clear_discovery") => "DNS-SD を使う",
+        (Language::English, "config.port_start") => "Sender port start",
+        (Language::Japanese, "config.port_start") => "送信ポート開始",
+        (Language::English, "config.port_end") => "Sender port end",
+        (Language::Japanese, "config.port_end") => "送信ポート終了",
+        (Language::English, "config.extra") => "All keys",
+        (Language::Japanese, "config.extra") => "すべてのキー",
+        (Language::English, "config.add") => "Add",
+        (Language::Japanese, "config.add") => "追加",
+        (Language::English, "config.delete") => "Delete",
+        (Language::Japanese, "config.delete") => "削除",
+        (Language::English, "config.key") => "Key",
+        (Language::Japanese, "config.key") => "キー",
+        (Language::English, "config.value") => "Value",
+        (Language::Japanese, "config.value") => "値",
+        (Language::English, "config.saved") => "Saved",
+        (Language::Japanese, "config.saved") => "保存しました",
+        (Language::English, "config.reloaded") => "Reloaded",
+        (Language::Japanese, "config.reloaded") => "再読込しました",
+
+        // Discovery Server GUI
+        (Language::English, "discovery.bind") => "Bind address",
+        (Language::Japanese, "discovery.bind") => "バインドアドレス",
+        (Language::English, "discovery.port") => "Port",
+        (Language::Japanese, "discovery.port") => "ポート",
+        (Language::English, "discovery.start") => "Start",
+        (Language::Japanese, "discovery.start") => "開始",
+        (Language::English, "discovery.stop") => "Stop",
+        (Language::Japanese, "discovery.stop") => "停止",
+        (Language::English, "discovery.running") => "Running",
+        (Language::Japanese, "discovery.running") => "稼働中",
+        (Language::English, "discovery.stopped") => "Stopped",
+        (Language::Japanese, "discovery.stopped") => "停止中",
+        (Language::English, "discovery.peers") => "Clients",
+        (Language::Japanese, "discovery.peers") => "クライアント",
+        (Language::English, "discovery.sources") => "Registered sources",
+        (Language::Japanese, "discovery.sources") => "登録ソース",
+        (Language::English, "discovery.none") => "None",
+        (Language::Japanese, "discovery.none") => "なし",
+        (Language::English, "discovery.log") => "Event log",
+        (Language::Japanese, "discovery.log") => "イベントログ",
+        (Language::English, "discovery.clear_log") => "Clear",
+        (Language::Japanese, "discovery.clear_log") => "クリア",
+        (Language::English, "discovery.bind_hint") => ":: for all interfaces (IPv6 dual-stack)",
+        (Language::Japanese, "discovery.bind_hint") => {
+            ":: ですべてのインターフェイス（IPv6 dual-stack）"
+        }
+
         _ => "???",
     }
 }
@@ -363,9 +439,13 @@ mod tests {
             "simd",
             "tool.studio_monitor",
             "tool.test_patterns",
+            "tool.config_manager",
+            "tool.discovery_server",
             "monitor.stalled",
             "patterns.start",
             "patterns.restart_required",
+            "config.path",
+            "discovery.start",
         ];
         for key in keys {
             assert_ne!(t(Language::English, key), key, "missing en key {key}");

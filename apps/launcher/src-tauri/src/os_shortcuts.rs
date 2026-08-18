@@ -322,6 +322,8 @@ fn linux_desktop_entry(tool: ToolId, exec: &str) -> String {
     let comment = match tool {
         ToolId::StudioMonitor => "Browse and view OMT sources on the LAN",
         ToolId::TestPatterns => "Pick a pattern and send video + tone over OMT",
+        ToolId::ConfigManager => "View and edit the global OMT settings.xml",
+        ToolId::DiscoveryServer => "Run an OMT discovery server for networks that block multicast",
         ToolId::ScreenCapture => "Capture the desktop and send over OMT",
     };
     format!(

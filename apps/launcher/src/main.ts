@@ -65,6 +65,14 @@ const TOOL_VISUALS: Record<string, ToolVisual> = {
     accent: "#f0c14a",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="12" cy="11" r="3"/><path d="M8 21h8"/></svg>`,
   },
+  "config-manager": {
+    accent: "#5ad1a4",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>`,
+  },
+  "discovery-server": {
+    accent: "#c58cff",
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 5v2M12 17v2M5 12h2M17 12h2M7 7l1.5 1.5M15.5 15.5L17 17M7 17l1.5-1.5M15.5 8.5L17 7"/></svg>`,
+  },
 };
 
 let state: LauncherState | null = null;

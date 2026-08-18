@@ -26,3 +26,6 @@ function Ensure-One([string]$Name) {
 
 Ensure-One omt-studio-monitor
 Ensure-One omt-test-patterns
+Ensure-One omt-config-manager
+Ensure-One omt-discovery-server-gui
+Ensure-One omt-discovery-server

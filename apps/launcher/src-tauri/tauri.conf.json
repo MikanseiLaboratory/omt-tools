@@ -44,7 +44,10 @@
     "createUpdaterArtifacts": true,
     "externalBin": [
       "binaries/omt-studio-monitor",
-      "binaries/omt-test-patterns"
+      "binaries/omt-test-patterns",
+      "binaries/omt-config-manager",
+      "binaries/omt-discovery-server-gui",
+      "binaries/omt-discovery-server"
     ],
     "icon": [
       "icons/32x32.png",
@@ -73,13 +76,17 @@
       "deb": {
         "files": {
           "/usr/share/applications/lab.mikansei.omt-studio-monitor.desktop": "linux/omt-studio-monitor.desktop",
-          "/usr/share/applications/lab.mikansei.omt-test-patterns.desktop": "linux/omt-test-patterns.desktop"
+          "/usr/share/applications/lab.mikansei.omt-test-patterns.desktop": "linux/omt-test-patterns.desktop",
+          "/usr/share/applications/lab.mikansei.omt-config-manager.desktop": "linux/omt-config-manager.desktop",
+          "/usr/share/applications/lab.mikansei.omt-discovery-server.desktop": "linux/omt-discovery-server.desktop"
         }
       },
       "rpm": {
         "files": {
           "/usr/share/applications/lab.mikansei.omt-studio-monitor.desktop": "linux/omt-studio-monitor.desktop",
-          "/usr/share/applications/lab.mikansei.omt-test-patterns.desktop": "linux/omt-test-patterns.desktop"
+          "/usr/share/applications/lab.mikansei.omt-test-patterns.desktop": "linux/omt-test-patterns.desktop",
+          "/usr/share/applications/lab.mikansei.omt-config-manager.desktop": "linux/omt-config-manager.desktop",
+          "/usr/share/applications/lab.mikansei.omt-discovery-server.desktop": "linux/omt-discovery-server.desktop"
         }
       }
     }
