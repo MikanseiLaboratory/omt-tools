@@ -1219,8 +1219,7 @@ dependencies = [
  "anyhow",
  "clap",
  "omt-media",
- "tracing",
- "tracing-subscriber",
+ "suite-core",
 ]
 
 [[package]]
@@ -6103,8 +6102,6 @@ dependencies = [
  "omt-media",
  "parking_lot",
  "suite-core",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -6122,8 +6119,6 @@ dependencies = [
  "rfd",
  "smallvec",
  "suite-core",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -8419,6 +8414,8 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
