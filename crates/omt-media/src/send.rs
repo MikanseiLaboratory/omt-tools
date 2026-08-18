@@ -714,11 +714,8 @@ mod tests {
 
     #[test]
     fn rebase_buffer_indices_keeps_pixels_and_retimes() {
-        let mut buffer = VecDeque::from([
-            (10u64, vec![1u8, 2]),
-            (11, vec![3, 4]),
-            (12, vec![5, 6]),
-        ]);
+        let mut buffer =
+            VecDeque::from([(10u64, vec![1u8, 2]), (11, vec![3, 4]), (12, vec![5, 6])]);
         rebase_buffer_indices(&mut buffer, 40);
         assert_eq!(buffer[0].0, 40);
         assert_eq!(buffer[1].0, 41);
