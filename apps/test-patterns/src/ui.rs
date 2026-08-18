@@ -1955,10 +1955,12 @@ fn name_field(
     } else {
         name.to_string()
     };
+    // Keep truncation on the inner text so the clickable box stays full-width.
     div()
         .flex()
         .flex_col()
         .gap_1()
+        .w_full()
         .min_w_0()
         .child(
             div()
@@ -1969,6 +1971,7 @@ fn name_field(
         .child(
             div()
                 .id("source-name")
+                .w_full()
                 .px_2()
                 .py_1()
                 .rounded_md()
@@ -1982,14 +1985,21 @@ fn name_field(
                 .opacity(if locked { 0.55 } else { 1.0 })
                 .cursor_text()
                 .text_xs()
-                .min_w_0()
-                .truncate()
-                .child(display)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if !locked {
                         this.begin_edit_name(window, cx);
                     }
-                })),
+                }))
+                .child(if editing {
+                    div().w_full().child(display).into_any_element()
+                } else {
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .truncate()
+                        .child(display)
+                        .into_any_element()
+                }),
         )
 }
 
