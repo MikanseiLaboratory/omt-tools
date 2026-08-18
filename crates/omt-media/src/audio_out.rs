@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig};
@@ -13,6 +14,8 @@ use tracing::warn;
 
 const RING_CAP_SAMPLES: usize = 48_000 * 2 * 2; // ~2s stereo @ 48 kHz
 const TICKS_PER_SECOND: i64 = 10_000_000;
+/// If a stream is open but the callback never consumes PCM, mute after this.
+const DEAD_OUTPUT_GRACE: Duration = Duration::from_millis(500);
 
 /// Peak levels for VU display (linear 0..1, per channel).
 #[derive(Debug, Clone, Copy, Default)]
@@ -27,6 +30,17 @@ pub struct AudioLevels {
     pub sample_rate: i32,
     /// Declared channel count of the last packet.
     pub channels: i32,
+}
+
+/// Whether system audio playback is currently usable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioOutputStatus {
+    /// Output device is being opened.
+    Opening,
+    /// Device stream is running.
+    Ready,
+    /// No usable device; PCM is discarded and video stays on wall clock.
+    Unavailable,
 }
 
 /// A selectable system audio output device.
@@ -90,6 +104,14 @@ struct Shared {
     /// PTS currently being output (valid when `playhead_valid`).
     playhead_pts: AtomicI64,
     playhead_valid: AtomicBool,
+    /// Last time the device callback consumed queued PCM.
+    last_playback_activity: Mutex<Option<Instant>>,
+    status: Mutex<AudioOutputStatus>,
+    /// Fast path for [`AudioOutput::push_planar_f32`].
+    output_enabled: AtomicBool,
+    /// At least one packet was queued after the current stream opened.
+    queued_since_open: AtomicBool,
+    stream_opened_at: Mutex<Option<Instant>>,
 }
 
 enum AudioCmd {
@@ -127,6 +149,11 @@ impl AudioOutput {
             device_name: Mutex::new(None),
             playhead_pts: AtomicI64::new(0),
             playhead_valid: AtomicBool::new(false),
+            last_playback_activity: Mutex::new(None),
+            status: Mutex::new(AudioOutputStatus::Opening),
+            output_enabled: AtomicBool::new(false),
+            queued_since_open: AtomicBool::new(false),
+            stream_opened_at: Mutex::new(None),
         });
 
         let (cmd_tx, cmd_rx) = mpsc::channel();
@@ -140,6 +167,7 @@ impl AudioOutput {
             })
         {
             warn!("failed to spawn audio output thread: {e}");
+            apply_status(&shared, AudioOutputStatus::Unavailable);
             return Self {
                 shared,
                 cmd_tx: Mutex::new(None),
@@ -157,12 +185,20 @@ impl AudioOutput {
         self.shared.device_name.lock().clone()
     }
 
+    /// Snapshot of whether PCM is actually being sent to a device.
+    pub fn status(&self) -> AudioOutputStatus {
+        *self.shared.status.lock()
+    }
+
     /// Switch output device. `None` selects the system default.
     pub fn set_output_device(&self, name: Option<String>) {
         *self.shared.device_name.lock() = name.clone();
         self.clear();
         if let Some(tx) = self.cmd_tx.lock().as_ref() {
+            apply_status(&self.shared, AudioOutputStatus::Opening);
             let _ = tx.send(AudioCmd::SetDevice(name));
+        } else {
+            apply_status(&self.shared, AudioOutputStatus::Unavailable);
         }
     }
 
@@ -183,6 +219,14 @@ impl AudioOutput {
         } else {
             None
         }
+    }
+
+    /// Whether the output callback has recently consumed queued PCM.
+    pub(crate) fn playback_active(&self) -> bool {
+        self.shared
+            .last_playback_activity
+            .lock()
+            .is_some_and(|at| at.elapsed() <= Duration::from_millis(250))
     }
 
     /// Buffered audio duration currently sitting in the device ring (milliseconds).
@@ -206,6 +250,7 @@ impl AudioOutput {
         self.shared.ring.lock().clear();
         self.shared.pts_runs.lock().clear();
         *self.shared.levels.lock() = AudioLevels::default();
+        *self.shared.last_playback_activity.lock() = None;
         self.invalidate_playhead();
     }
 
@@ -213,6 +258,7 @@ impl AudioOutput {
     pub fn invalidate_playhead(&self) {
         self.shared.playhead_valid.store(false, Ordering::Release);
         self.shared.playhead_pts.store(0, Ordering::Release);
+        *self.shared.last_playback_activity.lock() = None;
     }
 
     /// Push planar f32 PCM (`ch0[samples]…chN[samples]` tightly packed as LE bytes).
@@ -230,6 +276,11 @@ impl AudioOutput {
         let n = samples.max(0) as usize;
         let expected = ch * n * 4;
         if n == 0 || data.len() < expected {
+            return;
+        }
+
+        if self.should_discard_pcm() {
+            self.record_silent_packet(sample_rate, channels);
             return;
         }
 
@@ -325,7 +376,48 @@ impl AudioOutput {
                 self.shared.playhead_pts.store(timestamp, Ordering::Release);
                 self.shared.playhead_valid.store(true, Ordering::Release);
             }
+            self.shared.queued_since_open.store(true, Ordering::Release);
         }
+    }
+
+    fn should_discard_pcm(&self) -> bool {
+        self.maybe_declare_dead_output();
+        !self.shared.output_enabled.load(Ordering::Acquire)
+    }
+
+    fn maybe_declare_dead_output(&self) {
+        if !self.shared.output_enabled.load(Ordering::Acquire) {
+            return;
+        }
+        if self.playback_active() {
+            return;
+        }
+        if !self.shared.queued_since_open.load(Ordering::Acquire) {
+            return;
+        }
+        let Some(opened_at) = *self.shared.stream_opened_at.lock() else {
+            return;
+        };
+        if opened_at.elapsed() <= DEAD_OUTPUT_GRACE {
+            return;
+        }
+        warn!("audio output opened but is not consuming PCM; muting");
+        apply_status(&self.shared, AudioOutputStatus::Unavailable);
+        self.shared.ring.lock().clear();
+        self.shared.pts_runs.lock().clear();
+        self.invalidate_playhead();
+        let mut levels = self.shared.levels.lock();
+        levels.peak_l = 0.0;
+        levels.peak_r = 0.0;
+    }
+
+    fn record_silent_packet(&self, sample_rate: i32, channels: i32) {
+        let mut levels = self.shared.levels.lock();
+        levels.peak_l = 0.0;
+        levels.peak_r = 0.0;
+        levels.frames = levels.frames.saturating_add(1);
+        levels.sample_rate = sample_rate;
+        levels.channels = channels;
     }
 }
 
@@ -365,6 +457,27 @@ fn db_to_gain(db: i32) -> f32 {
     10f32.powf(db as f32 / 20.0)
 }
 
+fn apply_status(shared: &Shared, status: AudioOutputStatus) {
+    *shared.status.lock() = status;
+    let ready = matches!(status, AudioOutputStatus::Ready);
+    shared.output_enabled.store(ready, Ordering::Release);
+    if ready {
+        *shared.stream_opened_at.lock() = Some(Instant::now());
+        shared.queued_since_open.store(false, Ordering::Release);
+    } else {
+        *shared.stream_opened_at.lock() = None;
+        shared.queued_since_open.store(false, Ordering::Release);
+        shared.output_enabled.store(false, Ordering::Release);
+    }
+}
+
+fn wait_device_cmd(cmd_rx: &mpsc::Receiver<AudioCmd>) -> Option<Option<String>> {
+    match cmd_rx.recv() {
+        Ok(AudioCmd::SetDevice(name)) => Some(name),
+        Ok(AudioCmd::Shutdown) | Err(_) => None,
+    }
+}
+
 fn resolve_device(name: &Option<String>) -> Result<cpal::Device, String> {
     let host = cpal::default_host();
     if let Some(want) = name {
@@ -383,18 +496,19 @@ fn resolve_device(name: &Option<String>) -> Result<cpal::Device, String> {
 fn run_output_thread(shared: Arc<Shared>, cmd_rx: mpsc::Receiver<AudioCmd>) -> Result<(), String> {
     let mut selected = shared.device_name.lock().clone();
     loop {
+        apply_status(&shared, AudioOutputStatus::Opening);
         let device = match resolve_device(&selected) {
             Ok(d) => d,
             Err(e) => {
                 warn!("audio output unavailable: {e}");
-                // Wait for a device change / shutdown instead of exiting permanently.
-                match cmd_rx.recv() {
-                    Ok(AudioCmd::SetDevice(name)) => {
+                apply_status(&shared, AudioOutputStatus::Unavailable);
+                match wait_device_cmd(&cmd_rx) {
+                    Some(name) => {
                         selected = name;
                         *shared.device_name.lock() = selected.clone();
                         continue;
                     }
-                    Ok(AudioCmd::Shutdown) | Err(_) => return Ok(()),
+                    None => return Ok(()),
                 }
             }
         };
@@ -403,13 +517,14 @@ fn run_output_thread(shared: Arc<Shared>, cmd_rx: mpsc::Receiver<AudioCmd>) -> R
             Ok(c) => c,
             Err(e) => {
                 warn!("audio output config failed: {e}");
-                match cmd_rx.recv() {
-                    Ok(AudioCmd::SetDevice(name)) => {
+                apply_status(&shared, AudioOutputStatus::Unavailable);
+                match wait_device_cmd(&cmd_rx) {
+                    Some(name) => {
                         selected = name;
                         *shared.device_name.lock() = selected.clone();
                         continue;
                     }
-                    Ok(AudioCmd::Shutdown) | Err(_) => return Ok(()),
+                    None => return Ok(()),
                 }
             }
         };
@@ -423,6 +538,7 @@ fn run_output_thread(shared: Arc<Shared>, cmd_rx: mpsc::Receiver<AudioCmd>) -> R
         shared.ring.lock().clear();
         shared.pts_runs.lock().clear();
         shared.playhead_valid.store(false, Ordering::Release);
+        *shared.last_playback_activity.lock() = None;
 
         let shared_cb = Arc::clone(&shared);
         let stream = match sample_format {
@@ -431,13 +547,14 @@ fn run_output_thread(shared: Arc<Shared>, cmd_rx: mpsc::Receiver<AudioCmd>) -> R
             SampleFormat::U16 => build_stream::<u16>(&device, &config, shared_cb),
             other => {
                 warn!("unsupported sample format: {other:?}");
-                match cmd_rx.recv() {
-                    Ok(AudioCmd::SetDevice(name)) => {
+                apply_status(&shared, AudioOutputStatus::Unavailable);
+                match wait_device_cmd(&cmd_rx) {
+                    Some(name) => {
                         selected = name;
                         *shared.device_name.lock() = selected.clone();
                         continue;
                     }
-                    Ok(AudioCmd::Shutdown) | Err(_) => return Ok(()),
+                    None => return Ok(()),
                 }
             }
         };
@@ -445,28 +562,41 @@ fn run_output_thread(shared: Arc<Shared>, cmd_rx: mpsc::Receiver<AudioCmd>) -> R
             Ok(s) => s,
             Err(e) => {
                 warn!("audio stream build failed: {e}");
-                match cmd_rx.recv() {
-                    Ok(AudioCmd::SetDevice(name)) => {
+                apply_status(&shared, AudioOutputStatus::Unavailable);
+                match wait_device_cmd(&cmd_rx) {
+                    Some(name) => {
                         selected = name;
                         *shared.device_name.lock() = selected.clone();
                         continue;
                     }
-                    Ok(AudioCmd::Shutdown) | Err(_) => return Ok(()),
+                    None => return Ok(()),
                 }
             }
         };
         if let Err(e) = stream.play() {
             warn!("audio stream play failed: {e}");
+            drop(stream);
+            apply_status(&shared, AudioOutputStatus::Unavailable);
+            match wait_device_cmd(&cmd_rx) {
+                Some(name) => {
+                    selected = name;
+                    *shared.device_name.lock() = selected.clone();
+                    continue;
+                }
+                None => return Ok(()),
+            }
         }
+        apply_status(&shared, AudioOutputStatus::Ready);
 
-        match cmd_rx.recv() {
-            Ok(AudioCmd::SetDevice(name)) => {
+        match wait_device_cmd(&cmd_rx) {
+            Some(name) => {
                 drop(stream);
                 selected = name;
                 *shared.device_name.lock() = selected.clone();
             }
-            Ok(AudioCmd::Shutdown) | Err(_) => {
+            None => {
                 drop(stream);
+                apply_status(&shared, AudioOutputStatus::Unavailable);
                 return Ok(());
             }
         }
@@ -482,6 +612,7 @@ where
     T: cpal::Sample + cpal::SizedSample + cpal::FromSample<f32>,
 {
     let channels = config.channels.max(1) as usize;
+    let err_shared = Arc::clone(&shared);
     device
         .build_output_stream(
             *config,
@@ -505,10 +636,84 @@ where
                 if frames_from_ring > 0 {
                     let mut runs = shared.pts_runs.lock();
                     consume_pts_frames(&mut runs, frames_from_ring, &shared);
+                    *shared.last_playback_activity.lock() = Some(Instant::now());
                 }
             },
-            |err| warn!("audio stream error: {err}"),
+            move |err| {
+                warn!("audio stream error: {err}");
+                apply_status(&err_shared, AudioOutputStatus::Unavailable);
+            },
             None,
         )
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stub(status: AudioOutputStatus) -> AudioOutput {
+        let ready = matches!(status, AudioOutputStatus::Ready);
+        let shared = Arc::new(Shared {
+            ring: Mutex::new(VecDeque::with_capacity(8192)),
+            pts_runs: Mutex::new(VecDeque::new()),
+            levels: Mutex::new(AudioLevels::default()),
+            boost_db: AtomicI32::new(0),
+            geometry: Mutex::new(DeviceGeometry {
+                channels: 2,
+                rate: 48_000,
+            }),
+            device_name: Mutex::new(None),
+            playhead_pts: AtomicI64::new(0),
+            playhead_valid: AtomicBool::new(false),
+            last_playback_activity: Mutex::new(None),
+            status: Mutex::new(status),
+            output_enabled: AtomicBool::new(ready),
+            queued_since_open: AtomicBool::new(false),
+            stream_opened_at: Mutex::new(ready.then(Instant::now)),
+        });
+        AudioOutput {
+            shared,
+            cmd_tx: Mutex::new(None),
+        }
+    }
+
+    fn loud_packet() -> Vec<u8> {
+        let sample = 0.75f32.to_le_bytes();
+        let mut data = Vec::with_capacity(8);
+        data.extend_from_slice(&sample);
+        data.extend_from_slice(&sample);
+        data
+    }
+
+    #[test]
+    fn unavailable_output_discards_pcm_and_vu() {
+        let audio = stub(AudioOutputStatus::Unavailable);
+        audio.push_planar_f32(&loud_packet(), 1, 1, 48_000, 10_000);
+        let levels = audio.levels();
+        assert_eq!(levels.frames, 1);
+        assert_eq!(levels.peak_l, 0.0);
+        assert_eq!(levels.peak_r, 0.0);
+        assert!(audio.playhead_pts().is_none());
+        assert_eq!(audio.buffered_ms(), 0.0);
+        assert_eq!(audio.status(), AudioOutputStatus::Unavailable);
+    }
+
+    #[test]
+    fn idle_ready_stream_mutes_after_grace() {
+        let audio = stub(AudioOutputStatus::Ready);
+        *audio.shared.stream_opened_at.lock() =
+            Some(Instant::now() - DEAD_OUTPUT_GRACE - Duration::from_millis(50));
+        audio.push_planar_f32(&loud_packet(), 1, 1, 48_000, 10_000);
+        assert!(audio.buffered_ms() > 0.0);
+        assert_eq!(audio.status(), AudioOutputStatus::Ready);
+
+        audio.push_planar_f32(&loud_packet(), 1, 1, 48_000, 20_000);
+        assert_eq!(audio.status(), AudioOutputStatus::Unavailable);
+        assert_eq!(audio.buffered_ms(), 0.0);
+        assert!(audio.playhead_pts().is_none());
+        let levels = audio.levels();
+        assert_eq!(levels.peak_l, 0.0);
+        assert_eq!(levels.frames, 2);
+    }
 }

@@ -12,7 +12,9 @@ mod send;
 mod stall;
 mod stats;
 
-pub use audio_out::{AudioLevels, AudioOutput, AudioOutputDevice, list_output_devices};
+pub use audio_out::{
+    AudioLevels, AudioOutput, AudioOutputDevice, AudioOutputStatus, list_output_devices,
+};
 pub use color::{rgb_to_uyvy_pixel, uyvy_from_rgb_frame};
 pub use discovery::{DiscoveredSource, SourceBrowser, discover_sources, spawn_discover};
 pub use playout::{BufferSettings, BufferUnit, DelaySetting};

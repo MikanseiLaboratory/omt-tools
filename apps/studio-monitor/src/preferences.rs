@@ -78,6 +78,7 @@ pub fn show(
     settings: &MonitorSettings,
     audio_devices: &[AudioOutputDevice],
     selected_audio: Option<&str>,
+    audio_unavailable: bool,
     buffer: BufferSettings,
     video_delay_ms: u32,
     audio_delay_ms: u32,
@@ -261,6 +262,18 @@ pub fn show(
                                     }
                                 });
                         });
+                    if audio_unavailable {
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new(t(language, "monitor.audio_unavailable"))
+                                .color(chrome.text),
+                        );
+                        ui.label(
+                            RichText::new(t(language, "monitor.audio_unavailable_hint"))
+                                .small()
+                                .color(chrome.text_muted),
+                        );
+                    }
 
                     // —— A/V buffer (text fields) ——
                     ui.add_space(12.0);
