@@ -192,6 +192,45 @@ pub fn uyvy_from_image_path(
     ))
 }
 
+/// Toroidally scroll a UYVY frame by `phase_x` / `phase_y` in `0..1`.
+///
+/// Horizontal offset is forced even so UYVY chroma pairs stay aligned.
+pub fn scroll_uyvy(
+    src: &[u8],
+    dst: &mut [u8],
+    width: i32,
+    height: i32,
+    phase_x: f32,
+    phase_y: f32,
+) {
+    let w = width.max(2) as usize;
+    let h = height.max(1) as usize;
+    let stride = w * 2;
+    assert!(src.len() >= stride * h);
+    assert!(dst.len() >= stride * h);
+
+    let ox = phase_offset(phase_x, w) & !1;
+    let oy = phase_offset(phase_y, h);
+    if ox == 0 && oy == 0 {
+        dst[..stride * h].copy_from_slice(&src[..stride * h]);
+        return;
+    }
+
+    let byte_ox = ox * 2;
+    for y in 0..h {
+        let sy = (y + oy) % h;
+        let src_row = &src[sy * stride..(sy + 1) * stride];
+        let dst_row = &mut dst[y * stride..(y + 1) * stride];
+        if byte_ox == 0 {
+            dst_row.copy_from_slice(src_row);
+        } else {
+            let (head, tail) = src_row.split_at(byte_ox);
+            dst_row[..stride - byte_ox].copy_from_slice(tail);
+            dst_row[stride - byte_ox..].copy_from_slice(head);
+        }
+    }
+}
+
 fn phase_offset(phase: f32, extent: usize) -> usize {
     if phase == 0.0 || extent == 0 {
         0
@@ -430,5 +469,33 @@ mod tests {
         assert_ne!(a, b);
         assert_ne!(a, c);
         assert_ne!(b, c);
+    }
+
+    #[test]
+    fn scroll_uyvy_wraps_independently() {
+        let w = 64;
+        let h = 36;
+        let src = generate_uyvy(PatternKind::Grid, w, h, 0.0, 0.0);
+        let mut a = vec![0u8; src.len()];
+        let mut b = vec![0u8; src.len()];
+        let mut c = vec![0u8; src.len()];
+        scroll_uyvy(&src, &mut a, w, h, 0.0, 0.0);
+        scroll_uyvy(&src, &mut b, w, h, 0.5, 0.0);
+        scroll_uyvy(&src, &mut c, w, h, 0.0, 0.5);
+        assert_eq!(a, src);
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(b, c);
+    }
+
+    #[test]
+    fn scroll_uyvy_full_cycle_returns_original() {
+        let w = 32;
+        let h = 18;
+        let src = generate_uyvy(PatternKind::Grid, w, h, 0.0, 0.0);
+        let mut dst = vec![0u8; src.len()];
+        // phase that maps to ox=0 (even) and oy=0 after rem_euclid
+        scroll_uyvy(&src, &mut dst, w, h, 1.0, 1.0);
+        assert_eq!(dst, src);
     }
 }

@@ -20,7 +20,7 @@ use omt_media::{
 };
 use openmediatransport::{Quality, uyvy_to_rgba};
 use parking_lot::Mutex;
-use pattern_generator::{PatternKind, fill_uyvy, uyvy_from_image_path};
+use pattern_generator::{PatternKind, fill_uyvy, scroll_uyvy, uyvy_from_image_path};
 use smallvec::smallvec;
 use suite_core::{
     Language, SimdCapabilities, TestPatternsConfig, load_test_patterns_config,
@@ -58,7 +58,7 @@ impl LivePattern {
         Self {
             kind,
             image_uyvy,
-            animate: animate && kind != PatternKind::Image,
+            animate,
             speed_h: speed_h_pct.clamp(-200, 200) as f32 / 100.0,
             speed_v: speed_v_pct.clamp(-200, 200) as f32 / 100.0,
             phase_x: 0.0,
@@ -387,6 +387,8 @@ struct PatternsView {
     error: Option<SharedString>,
     thumbs: Vec<(PatternKind, Option<Arc<RenderImage>>)>,
     preview: Option<Arc<RenderImage>>,
+    /// Preview-sized UYVY cache for the selected custom image (scroll source).
+    preview_image_uyvy: Option<Arc<Vec<u8>>>,
     preview_phase_x: f32,
     preview_phase_y: f32,
     last_preview_at: Instant,
@@ -462,6 +464,7 @@ impl PatternsView {
             error: None,
             thumbs,
             preview: None,
+            preview_image_uyvy: None,
             preview_phase_x: 0.0,
             preview_phase_y: 0.0,
             last_preview_at: Instant::now() - Duration::from_secs(1),
@@ -496,9 +499,9 @@ impl PatternsView {
         if let Some(session) = &self.session {
             self.last_stats = session.stats();
         }
-        // Still-image preview is loaded once at pick time; animate generated patterns
-        // at the selected output frame rate (was previously hard-capped at ~5 fps).
-        if self.kind != PatternKind::Image {
+        // Animate generated patterns and custom images at the selected output frame rate.
+        // Static image stills skip the tick until Animate is enabled.
+        if self.kind != PatternKind::Image || self.animate {
             let frame_interval = Duration::from_secs_f64(
                 self.frame_rate.d.max(1) as f64 / self.frame_rate.n.max(1) as f64,
             );
@@ -553,6 +556,7 @@ impl PatternsView {
         }
         self.kind = kind;
         self.selected_custom = None;
+        self.preview_image_uyvy = None;
         self.push_live_content(!self.animate);
         self.refresh_preview(cx);
         cx.notify();
@@ -568,23 +572,20 @@ impl PatternsView {
             return;
         };
         let path = entry.path.clone();
-        let preview = match rgba_image_from_path(&path, PREVIEW_W as u32, PREVIEW_H as u32) {
-            Ok(img) => img,
+        let preview_uyvy = match uyvy_from_image_path(&path, PREVIEW_W, PREVIEW_H) {
+            Ok(buf) => Arc::new(buf),
             Err(e) => {
-                self.error = Some(SharedString::from(e));
+                self.error = Some(SharedString::from(e.to_string()));
                 cx.notify();
                 return;
             }
         };
-        if let Some(old) = self.preview.take() {
-            cx.drop_image(old, None);
-        }
-        self.preview = Some(preview);
-        self.last_preview_at = Instant::now();
+        self.preview_image_uyvy = Some(preview_uyvy);
         self.selected_custom = Some(index);
         self.kind = PatternKind::Image;
         self.error = None;
         self.push_live_content(true);
+        self.refresh_preview(cx);
         cx.notify();
     }
 
@@ -676,6 +677,7 @@ impl PatternsView {
         }
         if was_selected {
             self.selected_custom = None;
+            self.preview_image_uyvy = None;
             self.kind = PatternKind::SmpteColorBars;
             self.push_live_content(!self.animate);
             self.refresh_preview(cx);
@@ -983,7 +985,7 @@ impl PatternsView {
         } else {
             None
         };
-        let animate = self.animate && self.kind != PatternKind::Image;
+        let animate = self.animate;
         {
             let mut live = self.live.lock();
             live.kind = self.kind;
@@ -1033,12 +1035,10 @@ impl PatternsView {
         let height = self.height;
         let live = Arc::clone(&self.live);
         let provider: Arc<dyn Fn(u64) -> Vec<u8> + Send + Sync> = Arc::new(move |_idx| {
-            let (kind, phase_x, phase_y) = {
+            let (kind, phase_x, phase_y, image) = {
                 let mut state = live.lock();
-                if let Some(ref still) = state.image_uyvy {
-                    return still.as_ref().clone();
-                }
                 let kind = state.kind;
+                let image = state.image_uyvy.clone();
                 let (phase_x, phase_y) = if state.animate {
                     let px = state.phase_x;
                     let py = state.phase_y;
@@ -1050,8 +1050,16 @@ impl PatternsView {
                 } else {
                     (0.0, 0.0)
                 };
-                (kind, phase_x, phase_y)
+                (kind, phase_x, phase_y, image)
             };
+            if let Some(still) = image {
+                if phase_x == 0.0 && phase_y == 0.0 {
+                    return still.as_ref().clone();
+                }
+                let mut buf = vec![0u8; (width as usize) * 2 * (height as usize)];
+                scroll_uyvy(still.as_ref(), &mut buf, width, height, phase_x, phase_y);
+                return buf;
+            }
             let mut buf = vec![0u8; (width as usize) * 2 * (height as usize)];
             fill_uyvy(kind, &mut buf, width, height, phase_x, phase_y);
             buf
@@ -1064,7 +1072,7 @@ impl PatternsView {
             fps_n: self.frame_rate.n,
             fps_d: self.frame_rate.d,
             quality: self.quality,
-            animate: self.animate && self.kind != PatternKind::Image,
+            animate: self.animate,
             frame_buffer_frames: self.frame_buffer_frames,
             audio: self.audio_config(),
         };
@@ -1083,17 +1091,27 @@ impl PatternsView {
 
     fn refresh_preview(&mut self, cx: &mut Context<Self>) {
         self.last_preview_at = Instant::now();
-        // Image stills are assigned once when selecting a custom image.
-        if self.kind == PatternKind::Image {
-            return;
-        }
         let (phase_x, phase_y) = if self.animate {
             (self.preview_phase_x, self.preview_phase_y)
         } else {
             (0.0, 0.0)
         };
-        let mut uyvy = vec![0u8; (PREVIEW_W as usize) * 2 * (PREVIEW_H as usize)];
-        fill_uyvy(self.kind, &mut uyvy, PREVIEW_W, PREVIEW_H, phase_x, phase_y);
+        let uyvy = if self.kind == PatternKind::Image {
+            let Some(src) = self.preview_image_uyvy.as_ref() else {
+                return;
+            };
+            if phase_x == 0.0 && phase_y == 0.0 {
+                src.as_ref().clone()
+            } else {
+                let mut buf = vec![0u8; (PREVIEW_W as usize) * 2 * (PREVIEW_H as usize)];
+                scroll_uyvy(src.as_ref(), &mut buf, PREVIEW_W, PREVIEW_H, phase_x, phase_y);
+                buf
+            }
+        } else {
+            let mut buf = vec![0u8; (PREVIEW_W as usize) * 2 * (PREVIEW_H as usize)];
+            fill_uyvy(self.kind, &mut buf, PREVIEW_W, PREVIEW_H, phase_x, phase_y);
+            buf
+        };
         let rgba = uyvy_to_rgba(&uyvy, PREVIEW_W as u32, PREVIEW_H as u32);
         if let Some(image) = rgba_to_render_image(rgba, PREVIEW_W as u32, PREVIEW_H as u32) {
             if let Some(old) = self.preview.take() {
