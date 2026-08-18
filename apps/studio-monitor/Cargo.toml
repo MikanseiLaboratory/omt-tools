@@ -20,5 +20,3 @@ egui.workspace = true
 omt-media.workspace = true
 parking_lot.workspace = true
 suite-core = { workspace = true, features = ["egui-fonts"] }
-tracing.workspace = true
-tracing-subscriber.workspace = true

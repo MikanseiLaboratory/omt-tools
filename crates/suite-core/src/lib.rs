@@ -5,6 +5,7 @@
 mod config;
 mod fonts;
 mod i18n;
+mod logging;
 mod reveal;
 mod simd;
 mod theme;
@@ -20,6 +21,7 @@ pub use config::{
 pub use fonts::install_egui_cjk_fonts;
 pub use fonts::load_cjk_font_bytes;
 pub use i18n::{Language, t};
+pub use logging::init_tracing;
 pub use reveal::{RevealError, reveal_in_file_manager};
 pub use simd::SimdCapabilities;
 pub use theme::ThemePreference;

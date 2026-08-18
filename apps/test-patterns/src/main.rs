@@ -6,7 +6,7 @@
 mod ui;
 
 use clap::Parser;
-use suite_core::{LaunchOverrides, t};
+use suite_core::{LaunchOverrides, init_tracing, t};
 
 #[derive(Debug, Parser)]
 #[command(name = "omt-test-patterns", about = "OMT Test Patterns")]
@@ -20,9 +20,7 @@ struct Args {
 }
 
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    init_tracing();
 
     let args = Args::parse();
     let overrides = LaunchOverrides::resolve(

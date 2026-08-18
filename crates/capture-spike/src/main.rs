@@ -4,6 +4,7 @@ mod capture;
 
 use capture::CaptureProbe;
 use clap::Parser;
+use suite_core::init_tracing;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -17,9 +18,7 @@ struct Args {
 }
 
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    init_tracing();
 
     let args = Args::parse();
     let probe = CaptureProbe::detect()?;
