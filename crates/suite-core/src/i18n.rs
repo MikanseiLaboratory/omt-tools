@@ -243,8 +243,6 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::Japanese, "patterns.anim_speed_v") => "縦スピード",
         (Language::English, "patterns.frame_buffer") => "Frame buffer",
         (Language::Japanese, "patterns.frame_buffer") => "フレームバッファ",
-        (Language::English, "patterns.frame_buffer_unit") => "frames",
-        (Language::Japanese, "patterns.frame_buffer_unit") => "フレーム",
         (Language::English, "patterns.tone") => "Tone",
         (Language::Japanese, "patterns.tone") => "トーン",
         (Language::English, "patterns.tone_mute") => "Mute (−∞)",

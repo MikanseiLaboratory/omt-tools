@@ -360,6 +360,15 @@ fn sleep_until_deadline(deadline: Instant, running: &AtomicBool) {
     }
 }
 
+/// Relabel prefetched frames so the front matches `new_start`.
+///
+/// Used when skipping late slots: throw away timeline indices, keep pixels.
+fn rebase_buffer_indices(buffer: &mut VecDeque<(u64, Vec<u8>)>, new_start: u64) {
+    for (offset, (idx, _)) in buffer.iter_mut().enumerate() {
+        *idx = new_start.saturating_add(offset as u64);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn fill_video_buffer(
     buffer: &mut VecDeque<(u64, Vec<u8>)>,
@@ -460,6 +469,10 @@ fn video_loop(
         }
 
         let animate = animate_flag.load(Ordering::Relaxed);
+        // Generate at most one frame before the deadline check so a slow fill
+        // cannot skip-loop forever (clearing the buffer each time it overruns
+        // one slot). Remaining depth is prefetched after send.
+        let warmup = if buffer.is_empty() { 1 } else { buffer.len() };
         if !fill_video_buffer(
             &mut buffer,
             frame_idx,
@@ -468,14 +481,15 @@ fn video_loop(
             epoch_n,
             &mut cached,
             frame_bytes,
-            buffer_depth,
+            warmup,
         ) {
             thread::sleep(Duration::from_millis(5));
             continue;
         }
 
-        // Absolute deadline pacing: sleep when early; when late, skip whole slots
-        // instead of bursting catch-up sends (Issue #27).
+        // Absolute deadline pacing: sleep when early; when late, skip whole
+        // slots instead of bursting catch-up sends (Issue #27). Ready pixels
+        // are kept and retimed so the receiver still gets a frame.
         let deadline = frame_deadline(epoch, frame_idx, video_interval);
         let now = Instant::now();
         if now < deadline {
@@ -488,23 +502,18 @@ fn video_loop(
             let late_by = now.saturating_duration_since(deadline);
             let ideal = frames_elapsed(epoch.elapsed(), video_interval);
             if ideal > frame_idx {
+                rebase_buffer_indices(&mut buffer, ideal);
                 frame_idx = ideal;
-                buffer.clear();
                 behind = true;
-                continue;
+            } else {
+                behind = late_by > late_slack;
             }
-            behind = late_by > late_slack;
         }
 
-        let Some((idx, uyvy)) = buffer.pop_front() else {
+        let Some((_idx, uyvy)) = buffer.pop_front() else {
             behind = true;
             continue;
         };
-        if idx != frame_idx {
-            // Buffer was filled for an older index; rebuild for the current slot.
-            buffer.clear();
-            continue;
-        }
 
         let timestamp = (frame_idx as i64).saturating_mul(video_interval);
         let frame = MediaFrame {
@@ -523,6 +532,16 @@ fn video_loop(
         };
         let _ = sender.lock().send_video(frame);
         frame_idx = frame_idx.saturating_add(1);
+        let _ = fill_video_buffer(
+            &mut buffer,
+            frame_idx,
+            &provider,
+            animate,
+            epoch_n,
+            &mut cached,
+            frame_bytes,
+            buffer_depth,
+        );
 
         if last_stats.elapsed() >= STATS_INTERVAL {
             let (st, port, connections, video_subs, audio_subs) = {
@@ -691,5 +710,22 @@ mod tests {
             clamp_video_frame_buffer_frames(MAX_VIDEO_FRAME_BUFFER_FRAMES + 10),
             MAX_VIDEO_FRAME_BUFFER_FRAMES as usize
         );
+    }
+
+    #[test]
+    fn rebase_buffer_indices_keeps_pixels_and_retimes() {
+        let mut buffer = VecDeque::from([
+            (10u64, vec![1u8, 2]),
+            (11, vec![3, 4]),
+            (12, vec![5, 6]),
+        ]);
+        rebase_buffer_indices(&mut buffer, 40);
+        assert_eq!(buffer[0].0, 40);
+        assert_eq!(buffer[1].0, 41);
+        assert_eq!(buffer[2].0, 42);
+        assert_eq!(buffer[0].1, vec![1, 2]);
+        let (idx, pixels) = buffer.pop_front().expect("ready frame");
+        assert_eq!(idx, 40);
+        assert_eq!(pixels, vec![1, 2]);
     }
 }

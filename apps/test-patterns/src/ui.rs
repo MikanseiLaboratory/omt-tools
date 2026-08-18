@@ -1177,17 +1177,6 @@ impl Render for PatternsView {
                                     format!("{speed_v}%"),
                                     |this, cx| this.nudge_anim_speed_v(-10, cx),
                                     |this, cx| this.nudge_anim_speed_v(10, cx),
-                                ))
-                                .child(stepper_row(
-                                    cx,
-                                    "frame-buffer",
-                                    t(language, "patterns.frame_buffer"),
-                                    format!(
-                                        "{frame_buffer_frames} {}",
-                                        t(language, "patterns.frame_buffer_unit")
-                                    ),
-                                    |this, cx| this.nudge_frame_buffer(-1, cx),
-                                    |this, cx| this.nudge_frame_buffer(1, cx),
                                 )),
                         ),
                 )
@@ -1222,6 +1211,7 @@ impl Render for PatternsView {
                             frame_rate,
                             open_menu == Some(MenuKind::Fps),
                         ))
+                        .child(frame_buffer_control(cx, language, frame_buffer_frames))
                         .child(quality_control(cx, language, quality))
                         .child(level_control(
                             cx,
@@ -1291,8 +1281,8 @@ fn overlay_layer(
             MenuKind::Resolution => (px(16.0), px(168.0)),
             MenuKind::Tone => (px(148.0), px(160.0)),
             MenuKind::Fps => (px(304.0), px(100.0)),
-            // After quality segmented control (~130px).
-            MenuKind::Level => (px(538.0), px(120.0)),
+            // After FPS, frame-buffer stepper (~90px), and quality segmented control (~130px).
+            MenuKind::Level => (px(644.0), px(120.0)),
         };
         let menu_div = div()
             .absolute()
@@ -2005,6 +1995,44 @@ where
         .on_click(cx.listener(move |this, _, _, cx| {
             handler(this, cx);
         }))
+}
+
+fn frame_buffer_control(
+    cx: &mut Context<PatternsView>,
+    language: Language,
+    frames: u32,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .text_xs()
+                .opacity(0.65)
+                .child(t(language, "patterns.frame_buffer")),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .h(px(24.0))
+                .child(step_btn(cx, "frame-buffer-dec", "−", |this, cx| {
+                    this.nudge_frame_buffer(-1, cx);
+                }))
+                .child(
+                    div()
+                        .w(px(24.0))
+                        .text_xs()
+                        .text_center()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(format!("{frames}")),
+                )
+                .child(step_btn(cx, "frame-buffer-inc", "+", |this, cx| {
+                    this.nudge_frame_buffer(1, cx);
+                })),
+        )
 }
 
 fn fps_control(
