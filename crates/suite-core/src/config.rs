@@ -46,6 +46,26 @@ impl Default for SuiteConfig {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_side_panel_w() -> u32 {
+    360
+}
+
+fn default_sidebar_w() -> u32 {
+    300
+}
+
+fn default_stats_w() -> u32 {
+    280
+}
+
+fn default_log_h() -> u32 {
+    180
+}
+
 /// Encoding quality stored in Test Patterns preferences.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -91,6 +111,15 @@ pub struct TestPatternsConfig {
     pub tone_hz: f32,
     /// Tone peak level in dBFS.
     pub level_dbfs: f32,
+    /// Right side-panel width in logical pixels.
+    #[serde(default = "default_side_panel_w")]
+    pub side_panel_w: u32,
+    /// Whether the statistics group is expanded.
+    #[serde(default = "default_true")]
+    pub stats_open: bool,
+    /// Whether the settings group is expanded.
+    #[serde(default = "default_true")]
+    pub settings_open: bool,
 }
 
 impl Default for TestPatternsConfig {
@@ -110,6 +139,9 @@ impl Default for TestPatternsConfig {
             anim_speed_v_pct: 100,
             tone_hz: 1000.0,
             level_dbfs: -20.0,
+            side_panel_w: default_side_panel_w(),
+            stats_open: true,
+            settings_open: true,
         }
     }
 }
@@ -139,6 +171,11 @@ impl TestPatternsConfig {
             self.tone_hz = 0.0;
         }
         self.level_dbfs = self.level_dbfs.clamp(-120.0, 0.0);
+        if self.side_panel_w == 0 {
+            self.side_panel_w = default_side_panel_w();
+        } else {
+            self.side_panel_w = self.side_panel_w.clamp(240, 520);
+        }
         self
     }
 }
@@ -149,11 +186,37 @@ impl TestPatternsConfig {
 pub struct StudioMonitorConfig {
     /// Schema version.
     pub schema_version: u32,
+    /// Left sources sidebar width in logical pixels.
+    #[serde(default = "default_sidebar_w")]
+    pub sidebar_w: u32,
+    /// Right statistics panel width in logical pixels.
+    #[serde(default = "default_stats_w")]
+    pub stats_w: u32,
+    /// Bottom log panel height in logical pixels.
+    #[serde(default = "default_log_h")]
+    pub log_h: u32,
+    /// Whether the video statistics group is expanded.
+    #[serde(default = "default_true")]
+    pub stats_video_open: bool,
+    /// Whether the audio statistics group is expanded.
+    #[serde(default = "default_true")]
+    pub stats_audio_open: bool,
+    /// Whether the source-info group is expanded.
+    #[serde(default = "default_true")]
+    pub stats_source_open: bool,
 }
 
 impl Default for StudioMonitorConfig {
     fn default() -> Self {
-        Self { schema_version: 1 }
+        Self {
+            schema_version: 1,
+            sidebar_w: default_sidebar_w(),
+            stats_w: default_stats_w(),
+            log_h: default_log_h(),
+            stats_video_open: true,
+            stats_audio_open: true,
+            stats_source_open: true,
+        }
     }
 }
 
@@ -273,6 +336,9 @@ mod tests {
             anim_speed_v_pct: -20,
             tone_hz: 440.0,
             level_dbfs: -6.0,
+            side_panel_w: 400,
+            stats_open: false,
+            settings_open: false,
             ..Default::default()
         };
         let json = serde_json::to_string(&cfg).unwrap();
@@ -291,6 +357,9 @@ mod tests {
         assert_eq!(parsed.anim_speed_v_pct, -20);
         assert!((parsed.tone_hz - 440.0).abs() < f32::EPSILON);
         assert!((parsed.level_dbfs + 6.0).abs() < f32::EPSILON);
+        assert_eq!(parsed.side_panel_w, 400);
+        assert!(!parsed.stats_open);
+        assert!(!parsed.settings_open);
     }
 
     #[test]
@@ -309,6 +378,9 @@ mod tests {
         assert_eq!(parsed.anim_speed_v_pct, 100);
         assert!((parsed.tone_hz - 1000.0).abs() < f32::EPSILON);
         assert!((parsed.level_dbfs + 20.0).abs() < f32::EPSILON);
+        assert_eq!(parsed.side_panel_w, 360);
+        assert!(parsed.stats_open);
+        assert!(parsed.settings_open);
     }
 
     #[test]
@@ -337,6 +409,17 @@ mod tests {
         assert!((parsed.tone_hz - 0.0).abs() < f32::EPSILON);
         assert!((parsed.level_dbfs - 0.0).abs() < f32::EPSILON);
         assert_eq!(parsed.frame_buffer_frames, 16);
+    }
+
+    #[test]
+    fn legacy_studio_monitor_json_defaults_layout() {
+        let parsed: StudioMonitorConfig = serde_json::from_str(r#"{"schema_version":1}"#).unwrap();
+        assert_eq!(parsed.sidebar_w, 300);
+        assert_eq!(parsed.stats_w, 280);
+        assert_eq!(parsed.log_h, 180);
+        assert!(parsed.stats_video_open);
+        assert!(parsed.stats_audio_open);
+        assert!(parsed.stats_source_open);
     }
 
     #[test]

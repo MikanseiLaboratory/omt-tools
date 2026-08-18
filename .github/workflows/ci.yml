@@ -103,22 +103,6 @@ jobs:
             target/aarch64-pc-windows-msvc/release/omt-test-patterns*
             target/aarch64-pc-windows-msvc/release/omt-screen-capture-spike*
 
-  release-notes:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: Signing checklist
-        run: |
-          cat <<'EOF'
-          Before publishing a suite installer:
-          1. Generate Tauri updater keys: bun run tauri signer generate -w ~/.tauri/omt-tools.key
-          2. Put the public key into apps/launcher/src-tauri/tauri.conf.json plugins.updater.pubkey
-          3. Configure Windows Authenticode certificateThumbprint
-          4. Configure macOS Developer ID + notarization credentials
-          5. Host signed updater JSON + artifacts on HTTPS
-          6. Run scripts/prepare-sidecars then bun run tauri build in apps/launcher
-          EOF
-
   launcher-check:
     runs-on: windows-latest
     steps:

@@ -1,5 +1,6 @@
 //! OMT Tools Tauri launcher backend.
 
+mod os_shortcuts;
 mod tools;
 
 use serde::{Deserialize, Serialize};
@@ -7,6 +8,7 @@ use suite_core::{
     Language, SimdCapabilities, SuiteManifest, ThemePreference, ToolId, load_config, save_config,
     suite_manifest, t,
 };
+use tauri::Manager;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,12 +139,7 @@ fn save_settings(app: tauri::AppHandle, args: SaveSettingsArgs) -> Result<Launch
 
 #[tauri::command]
 fn launch_tool(app: tauri::AppHandle, tool_id: String) -> Result<(), String> {
-    let id = match tool_id.as_str() {
-        "studio-monitor" => ToolId::StudioMonitor,
-        "test-patterns" => ToolId::TestPatterns,
-        "screen-capture" => ToolId::ScreenCapture,
-        _ => return Err(format!("unknown tool: {tool_id}")),
-    };
+    let id = tools::parse_tool_id(&tool_id)?;
     tools::launch_tool(&app, id)
 }
 
@@ -151,13 +148,69 @@ fn list_running_tools() -> Result<Vec<String>, String> {
     Ok(tools::running_tool_names())
 }
 
+/// macOS menu bar takes its app title from the first submenu. An empty menu
+/// (`Menu::new`) makes that title blank. Windows / Linux stay menuless.
+fn native_menu<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> tauri::Result<tauri::menu::Menu<R>> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
+        let name = app
+            .config()
+            .product_name
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "OMT Tools".to_string());
+        let about = AboutMetadata {
+            name: Some(name.clone()),
+            version: Some(app.package_info().version.to_string()),
+            copyright: app.config().bundle.copyright.clone(),
+            authors: app.config().bundle.publisher.clone().map(|p| vec![p]),
+            ..Default::default()
+        };
+        let app_menu = Submenu::with_items(
+            app,
+            &name,
+            true,
+            &[
+                &PredefinedMenuItem::about(app, None, Some(about))?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::services(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::hide(app, None)?,
+                &PredefinedMenuItem::hide_others(app, None)?,
+                &PredefinedMenuItem::show_all(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::quit(app, None)?,
+            ],
+        )?;
+        Menu::with_items(app, &[&app_menu])
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        tauri::menu::Menu::new(app)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // No native application menu — keep chrome minimal like NDI Tools.
-        .menu(tauri::menu::Menu::new)
+        .menu(native_menu)
+        .setup(|app| {
+            if let Some(tool_id) = os_shortcuts::parse_launch_tool_id() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+                let id = tools::parse_tool_id(&tool_id)?;
+                tools::launch_tool(app.handle(), id)?;
+                std::process::exit(0);
+            }
+            os_shortcuts::ensure_registered(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_launcher_state,
             save_settings,

@@ -639,6 +639,8 @@ Section Install
   !endif
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !insertmacro CheckIfAppIsRunning "omt-studio-monitor.exe" "Studio Monitor"
+  !insertmacro CheckIfAppIsRunning "omt-test-patterns.exe" "Test Patterns"
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
@@ -717,6 +719,7 @@ Section Install
   ; Create start menu shortcut
   !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
     Call CreateOrUpdateStartMenuShortcut
+    Call CreateToolStartMenuShortcuts
   !insertmacro MUI_STARTMENU_WRITE_END
 
   ; Create desktop shortcut for silent and passive installers
@@ -776,6 +779,8 @@ Section Uninstall
   !endif
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !insertmacro CheckIfAppIsRunning "omt-studio-monitor.exe" "Studio Monitor"
+  !insertmacro CheckIfAppIsRunning "omt-test-patterns.exe" "Test Patterns"
 
   ; Delete the app directory and its content from disk
   ; Copy main executable
@@ -821,6 +826,7 @@ Section Uninstall
 
     ; Remove start menu shortcut
     !insertmacro MUI_STARTMENU_GETFOLDER Application $AppStartMenuFolder
+    Call un.DeleteToolStartMenuShortcuts
     !insertmacro IsShortcutTarget "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
     Pop $0
     ${If} $0 = 1
@@ -947,6 +953,37 @@ Function CreateOrUpdateStartMenuShortcut
     CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
     !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
   !endif
+FunctionEnd
+
+Function CreateToolStartMenuShortcuts
+  ; Create sidecar shortcuts even during updates so existing installs pick them up.
+  ${If} $NoShortcutMode = 1
+    Return
+  ${EndIf}
+
+  StrCpy $R1 "$AppStartMenuFolder"
+  ${If} $R1 == ""
+    StrCpy $R1 "${PRODUCTNAME}"
+  ${EndIf}
+  CreateDirectory "$SMPROGRAMS\$R1"
+
+  ${If} ${FileExists} "$INSTDIR\omt-studio-monitor.exe"
+    CreateShortcut "$SMPROGRAMS\$R1\Studio Monitor.lnk" "$INSTDIR\omt-studio-monitor.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\omt-test-patterns.exe"
+    CreateShortcut "$SMPROGRAMS\$R1\Test Patterns.lnk" "$INSTDIR\omt-test-patterns.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0
+  ${EndIf}
+FunctionEnd
+
+Function un.DeleteToolStartMenuShortcuts
+  StrCpy $R1 "$AppStartMenuFolder"
+  ${If} $R1 == ""
+    StrCpy $R1 "${PRODUCTNAME}"
+  ${EndIf}
+  Delete "$SMPROGRAMS\$R1\Studio Monitor.lnk"
+  Delete "$SMPROGRAMS\$R1\Test Patterns.lnk"
+  Delete "$SMPROGRAMS\${PRODUCTNAME}\Studio Monitor.lnk"
+  Delete "$SMPROGRAMS\${PRODUCTNAME}\Test Patterns.lnk"
 FunctionEnd
 
 Function CreateOrUpdateDesktopShortcut

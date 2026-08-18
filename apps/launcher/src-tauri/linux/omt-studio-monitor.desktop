@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OMT Studio Monitor
+Comment=Browse and view OMT sources on the LAN
+Exec=omt-studio-monitor
+TryExec=omt-studio-monitor
+Icon=OMT Tools
+Terminal=false
+StartupNotify=true
+StartupWMClass=omt-studio-monitor
+Categories=AudioVideo;Video;AudioVideoEditing;
+Keywords=OMT;NDI;monitor;video;
