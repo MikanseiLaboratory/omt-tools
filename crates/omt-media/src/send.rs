@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::f32::consts::TAU;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -134,6 +134,10 @@ pub struct SendSession {
     audio: Arc<Mutex<AudioToneConfig>>,
     animate: Arc<AtomicBool>,
     content_epoch: Arc<AtomicU64>,
+    sender: Arc<Mutex<Sender>>,
+    fps_n: Arc<AtomicI32>,
+    fps_d: Arc<AtomicI32>,
+    frame_buffer_frames: Arc<AtomicU32>,
     audio_join: Option<thread::JoinHandle<()>>,
     video_join: Option<thread::JoinHandle<()>>,
 }
@@ -181,6 +185,11 @@ impl SendSession {
         let audio = Arc::new(Mutex::new(config.audio.clone()));
         let animate = Arc::new(AtomicBool::new(config.animate));
         let content_epoch = Arc::new(AtomicU64::new(0));
+        let fps_n = Arc::new(AtomicI32::new(config.fps_n.max(1)));
+        let fps_d = Arc::new(AtomicI32::new(config.fps_d.max(1)));
+        let frame_buffer_frames = Arc::new(AtomicU32::new(clamp_video_frame_buffer_frames(
+            config.frame_buffer_frames,
+        ) as u32));
         let epoch = Instant::now();
 
         let audio_running = Arc::clone(&running);
@@ -195,6 +204,9 @@ impl SendSession {
         let video_stats = Arc::clone(&stats);
         let video_animate = Arc::clone(&animate);
         let video_epoch = Arc::clone(&content_epoch);
+        let video_fps_n = Arc::clone(&fps_n);
+        let video_fps_d = Arc::clone(&fps_d);
+        let video_buffer = Arc::clone(&frame_buffer_frames);
         let video_cfg = config.clone();
         let video_join = thread::Builder::new()
             .name("omt-send-video".into())
@@ -205,6 +217,9 @@ impl SendSession {
                     provider,
                     video_animate,
                     video_epoch,
+                    video_fps_n,
+                    video_fps_d,
+                    video_buffer,
                     video_running,
                     video_stats,
                     epoch,
@@ -217,6 +232,10 @@ impl SendSession {
             audio,
             animate,
             content_epoch,
+            sender,
+            fps_n,
+            fps_d,
+            frame_buffer_frames,
             audio_join: Some(audio_join),
             video_join: Some(video_join),
         })
@@ -246,6 +265,25 @@ impl SendSession {
     /// Invalidate a cached still frame (pattern / image changed while not animating).
     pub fn invalidate_content(&self) {
         self.content_epoch.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Hot-update encoding quality without tearing down the sender.
+    pub fn set_quality(&self, quality: Quality) {
+        self.sender.lock().set_quality(quality);
+    }
+
+    /// Hot-update output frame rate. Pacing and per-frame metadata follow.
+    pub fn set_frame_rate(&self, fps_n: i32, fps_d: i32) {
+        self.fps_n.store(fps_n.max(1), Ordering::Relaxed);
+        self.fps_d.store(fps_d.max(1), Ordering::Relaxed);
+    }
+
+    /// Hot-update paced video prefetch depth.
+    pub fn set_frame_buffer_frames(&self, frames: u32) {
+        self.frame_buffer_frames.store(
+            clamp_video_frame_buffer_frames(frames) as u32,
+            Ordering::Relaxed,
+        );
     }
 
     /// Stop tasks / threads.
@@ -335,11 +373,34 @@ fn duration_from_omt_ticks(ticks: i64) -> Duration {
     Duration::from_nanos(ticks.saturating_mul(100))
 }
 
+/// Frame interval in OMT ticks for `fps_n / fps_d`.
+fn video_interval_ticks(fps_n: i32, fps_d: i32) -> i64 {
+    (fps_d as i64).saturating_mul(TICKS_PER_SECOND) / fps_n.max(1) as i64
+}
+
 /// How many whole frame intervals fit in `elapsed` on the OMT tick timeline.
 fn frames_elapsed(elapsed: Duration, video_interval_ticks: i64) -> u64 {
     let interval = video_interval_ticks.max(1) as u128;
     let ticks = elapsed.as_nanos() / 100;
     (ticks / interval) as u64
+}
+
+/// Next paced index after a live frame-rate change.
+///
+/// Keeps timestamps on the shared wall clock and never steps backwards relative
+/// to `last_timestamp` (receivers drop or stall on non-monotonic PTS).
+fn next_frame_idx_after_rate_change(
+    elapsed: Duration,
+    new_interval_ticks: i64,
+    last_timestamp: i64,
+) -> u64 {
+    let interval = new_interval_ticks.max(1);
+    let wall_idx = frames_elapsed(elapsed, interval);
+    if last_timestamp < 0 {
+        return wall_idx;
+    }
+    let min_idx = (last_timestamp / interval) as u64 + 1;
+    wall_idx.max(min_idx)
 }
 
 /// Absolute deadline for `frame_idx` on a shared wall-clock epoch.
@@ -416,15 +477,17 @@ fn video_loop(
     provider: FrameProvider,
     animate_flag: Arc<AtomicBool>,
     content_epoch: Arc<AtomicU64>,
+    fps_n: Arc<AtomicI32>,
+    fps_d: Arc<AtomicI32>,
+    frame_buffer_frames: Arc<AtomicU32>,
     running: Arc<AtomicBool>,
     stats: Arc<Mutex<SendStats>>,
     epoch: Instant,
 ) {
     let stride = (cfg.width as usize) * 2;
     let frame_bytes = stride * cfg.height as usize;
-    let buffer_depth = clamp_video_frame_buffer_frames(cfg.frame_buffer_frames);
     let mut cached: Option<(u64, Vec<u8>)> = None;
-    let mut buffer: VecDeque<(u64, Vec<u8>)> = VecDeque::with_capacity(buffer_depth);
+    let mut buffer: VecDeque<(u64, Vec<u8>)> = VecDeque::new();
     let mut frame_idx = 0u64;
     let mut last_stats = Instant::now();
     let mut last_codec_time = 0i64;
@@ -432,13 +495,32 @@ fn video_loop(
     let mut behind = false;
     let mut was_subscribed = false;
     let mut last_content_epoch = content_epoch.load(Ordering::Relaxed);
-    let video_interval =
-        (cfg.fps_d as i64).saturating_mul(TICKS_PER_SECOND) / cfg.fps_n.max(1) as i64;
-    let target_fps = cfg.fps_n as f64 / cfg.fps_d.max(1) as f64;
+    let mut last_video_timestamp = -1i64;
+    let mut fps_n_now = fps_n.load(Ordering::Relaxed).max(1);
+    let mut fps_d_now = fps_d.load(Ordering::Relaxed).max(1);
+    let mut video_interval = video_interval_ticks(fps_n_now, fps_d_now);
+    let mut target_fps = fps_n_now as f64 / fps_d_now as f64;
     // Half a frame late still counts as the same slot; beyond that we skip ahead.
-    let late_slack = duration_from_omt_ticks(video_interval.max(1) / 2);
+    let mut late_slack = duration_from_omt_ticks(video_interval.max(1) / 2);
 
     while running.load(Ordering::Relaxed) {
+        let next_fps_n = fps_n.load(Ordering::Relaxed).max(1);
+        let next_fps_d = fps_d.load(Ordering::Relaxed).max(1);
+        if next_fps_n != fps_n_now || next_fps_d != fps_d_now {
+            fps_n_now = next_fps_n;
+            fps_d_now = next_fps_d;
+            video_interval = video_interval_ticks(fps_n_now, fps_d_now);
+            target_fps = fps_n_now as f64 / fps_d_now as f64;
+            late_slack = duration_from_omt_ticks(video_interval.max(1) / 2);
+            frame_idx = next_frame_idx_after_rate_change(
+                epoch.elapsed(),
+                video_interval,
+                last_video_timestamp,
+            );
+            buffer.clear();
+        }
+        let buffer_depth =
+            clamp_video_frame_buffer_frames(frame_buffer_frames.load(Ordering::Relaxed));
         let video_ok = {
             let mut s = sender.lock();
             let _ = s.poll_accept();
@@ -523,14 +605,15 @@ fn video_loop(
             width: cfg.width,
             height: cfg.height,
             stride: stride as i32,
-            frame_rate_n: cfg.fps_n,
-            frame_rate_d: cfg.fps_d,
+            frame_rate_n: fps_n_now,
+            frame_rate_d: fps_d_now,
             aspect_ratio: cfg.width as f32 / cfg.height.max(1) as f32,
             color_space: ColorSpace::Undefined,
             data: uyvy,
             ..Default::default()
         };
         let _ = sender.lock().send_video(frame);
+        last_video_timestamp = timestamp;
         frame_idx = frame_idx.saturating_add(1);
         let _ = fill_video_buffer(
             &mut buffer,
@@ -620,7 +703,7 @@ mod tests {
     use super::*;
 
     fn interval(fps_n: i32, fps_d: i32) -> i64 {
-        (fps_d as i64).saturating_mul(TICKS_PER_SECOND) / fps_n.max(1) as i64
+        video_interval_ticks(fps_n, fps_d)
     }
 
     #[test]
@@ -629,6 +712,29 @@ mod tests {
         assert_eq!(interval(60, 1), 166_666);
         assert_eq!(interval(30_000, 1_001), 333_666);
         assert_eq!(interval(60_000, 1_001), 166_833);
+    }
+
+    #[test]
+    fn rate_change_keeps_timestamps_monotonic() {
+        let iv30 = interval(30, 1);
+        let last_ts = 300 * iv30;
+        let elapsed = duration_from_omt_ticks(last_ts);
+        let iv60 = interval(60, 1);
+        let idx = next_frame_idx_after_rate_change(elapsed, iv60, last_ts);
+        let next_ts = (idx as i64).saturating_mul(iv60);
+        assert!(next_ts > last_ts, "next={next_ts} last={last_ts}");
+
+        let iv24 = interval(24, 1);
+        let idx_down = next_frame_idx_after_rate_change(elapsed, iv24, last_ts);
+        let next_down = (idx_down as i64).saturating_mul(iv24);
+        assert!(next_down > last_ts, "next={next_down} last={last_ts}");
+    }
+
+    #[test]
+    fn rate_change_without_prior_frame_follows_wall_clock() {
+        let iv = interval(30, 1);
+        let elapsed = duration_from_omt_ticks(iv.saturating_mul(10));
+        assert_eq!(next_frame_idx_after_rate_change(elapsed, iv, -1), 10);
     }
 
     #[test]
