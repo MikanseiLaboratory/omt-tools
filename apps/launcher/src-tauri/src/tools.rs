@@ -6,6 +6,16 @@ use std::process::Command;
 use suite_core::{LaunchOverrides, ToolId, load_config};
 use tauri::{AppHandle, Manager};
 
+/// Parse a launcher / CLI tool id (`studio-monitor`, `test-patterns`, ...).
+pub fn parse_tool_id(tool_id: &str) -> Result<ToolId, String> {
+    match tool_id {
+        "studio-monitor" => Ok(ToolId::StudioMonitor),
+        "test-patterns" => Ok(ToolId::TestPatterns),
+        "screen-capture" => Ok(ToolId::ScreenCapture),
+        _ => Err(format!("unknown tool: {tool_id}")),
+    }
+}
+
 /// Resolve the on-disk path for a bundled tool binary.
 pub fn resolve_tool_path(app: &AppHandle, tool: ToolId) -> Result<PathBuf, String> {
     let name = tool.binary_name();

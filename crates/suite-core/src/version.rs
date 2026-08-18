@@ -49,6 +49,33 @@ impl ToolId {
     pub const fn all() -> &'static [ToolId] {
         &[Self::StudioMonitor, Self::TestPatterns, Self::ScreenCapture]
     }
+
+    /// Start Menu / Applications / `.desktop` display name (English, OS chrome).
+    pub const fn os_entry_name(self) -> &'static str {
+        match self {
+            Self::StudioMonitor => "Studio Monitor",
+            Self::TestPatterns => "Test Patterns",
+            Self::ScreenCapture => "Screen Capture",
+        }
+    }
+
+    /// Prefixed name used where apps share a global namespace (Launchpad, GNOME).
+    pub const fn os_entry_name_qualified(self) -> &'static str {
+        match self {
+            Self::StudioMonitor => "OMT Studio Monitor",
+            Self::TestPatterns => "OMT Test Patterns",
+            Self::ScreenCapture => "OMT Screen Capture",
+        }
+    }
+
+    /// Stable OS integration id (`lab.mikansei.omt-tools.<id>`).
+    pub const fn os_entry_id(self) -> &'static str {
+        match self {
+            Self::StudioMonitor => "studio-monitor",
+            Self::TestPatterns => "test-patterns",
+            Self::ScreenCapture => "screen-capture",
+        }
+    }
 }
 
 /// Per-tool version entry in the suite manifest.
@@ -120,6 +147,16 @@ mod tests {
             m.tools
                 .iter()
                 .any(|t| t.id == ToolId::TestPatterns && t.enabled)
+        );
+    }
+
+    #[test]
+    fn os_entry_names_are_stable() {
+        assert_eq!(ToolId::StudioMonitor.os_entry_id(), "studio-monitor");
+        assert_eq!(ToolId::TestPatterns.os_entry_name(), "Test Patterns");
+        assert_eq!(
+            ToolId::StudioMonitor.os_entry_name_qualified(),
+            "OMT Studio Monitor"
         );
     }
 }

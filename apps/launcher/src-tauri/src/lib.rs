@@ -1,5 +1,6 @@
 //! OMT Tools Tauri launcher backend.
 
+mod os_shortcuts;
 mod tools;
 
 use serde::{Deserialize, Serialize};
@@ -7,6 +8,7 @@ use suite_core::{
     Language, SimdCapabilities, SuiteManifest, ThemePreference, ToolId, load_config, save_config,
     suite_manifest, t,
 };
+use tauri::Manager;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,12 +139,7 @@ fn save_settings(app: tauri::AppHandle, args: SaveSettingsArgs) -> Result<Launch
 
 #[tauri::command]
 fn launch_tool(app: tauri::AppHandle, tool_id: String) -> Result<(), String> {
-    let id = match tool_id.as_str() {
-        "studio-monitor" => ToolId::StudioMonitor,
-        "test-patterns" => ToolId::TestPatterns,
-        "screen-capture" => ToolId::ScreenCapture,
-        _ => return Err(format!("unknown tool: {tool_id}")),
-    };
+    let id = tools::parse_tool_id(&tool_id)?;
     tools::launch_tool(&app, id)
 }
 
@@ -158,6 +155,18 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         // No native application menu — keep chrome minimal like NDI Tools.
         .menu(tauri::menu::Menu::new)
+        .setup(|app| {
+            if let Some(tool_id) = os_shortcuts::parse_launch_tool_id() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+                let id = tools::parse_tool_id(&tool_id)?;
+                tools::launch_tool(app.handle(), id)?;
+                std::process::exit(0);
+            }
+            os_shortcuts::ensure_registered(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_launcher_state,
             save_settings,

@@ -61,11 +61,26 @@
       },
       "nsis": {
         "template": "./windows/installer.nsi",
-        "installMode": "both"
+        "installMode": "both",
+        "startMenuFolder": "OMT Tools"
       }
     },
     "macOS": {
       "minimumSystemVersion": "11.0"
+    },
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/applications/lab.mikansei.omt-studio-monitor.desktop": "linux/omt-studio-monitor.desktop",
+          "/usr/share/applications/lab.mikansei.omt-test-patterns.desktop": "linux/omt-test-patterns.desktop"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/share/applications/lab.mikansei.omt-studio-monitor.desktop": "linux/omt-studio-monitor.desktop",
+          "/usr/share/applications/lab.mikansei.omt-test-patterns.desktop": "linux/omt-test-patterns.desktop"
+        }
+      }
     }
   }
 }

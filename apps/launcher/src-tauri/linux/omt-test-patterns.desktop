@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OMT Test Patterns
+Comment=Pick a pattern and send video + tone over OMT
+Exec=omt-test-patterns
+TryExec=omt-test-patterns
+Icon=OMT Tools
+Terminal=false
+StartupNotify=true
+StartupWMClass=omt-test-patterns
+Categories=AudioVideo;Video;AudioVideoEditing;
+Keywords=OMT;NDI;pattern;smpte;video;
