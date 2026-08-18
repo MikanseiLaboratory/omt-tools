@@ -234,10 +234,10 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::English, "patterns.name") => "Source name",
         (Language::Japanese, "patterns.name") => "ソース名",
         (Language::English, "patterns.restart_required") => {
-            "Stop sending to change the source name or resolution."
+            "Stop sending to change the source name, resolution, or framerate."
         }
         (Language::Japanese, "patterns.restart_required") => {
-            "ソース名と解像度を変更するには送出を停止してください"
+            "ソース名・解像度・フレームレートを変更するには送出を停止してください"
         }
         (Language::English, "patterns.pattern") => "Pattern",
         (Language::Japanese, "patterns.pattern") => "パターン",

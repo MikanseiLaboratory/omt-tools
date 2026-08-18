@@ -791,14 +791,15 @@ impl PatternsView {
 
     fn set_frame_rate(&mut self, frame_rate: FrameRate, cx: &mut Context<Self>) {
         self.open_menu = None;
+        if self.session.is_some() {
+            cx.notify();
+            return;
+        }
         if self.frame_rate == frame_rate {
             cx.notify();
             return;
         }
         self.frame_rate = frame_rate;
-        if let Some(session) = self.session.as_ref() {
-            session.set_frame_rate(frame_rate.n, frame_rate.d);
-        }
         cx.notify();
     }
 
@@ -898,8 +899,8 @@ impl PatternsView {
     fn toggle_menu(&mut self, menu: MenuKind, cx: &mut Context<Self>) {
         self.custom_menu = None;
         self.name_editing = false;
-        if self.session.is_some() && menu == MenuKind::Resolution {
-            if self.open_menu == Some(MenuKind::Resolution) {
+        if self.session.is_some() && matches!(menu, MenuKind::Resolution | MenuKind::Fps) {
+            if self.open_menu == Some(menu) {
                 self.open_menu = None;
             }
             cx.notify();
@@ -1332,6 +1333,7 @@ impl Render for PatternsView {
                             language,
                             frame_rate,
                             open_menu == Some(MenuKind::Fps),
+                            sending,
                         ))
                         .child(frame_buffer_control(cx, language, frame_buffer_frames))
                         .child(quality_control(cx, language, quality))
@@ -2170,6 +2172,7 @@ fn fps_control(
     language: Language,
     selected: FrameRate,
     open: bool,
+    locked: bool,
 ) -> impl IntoElement {
     div()
         .flex()
@@ -2189,11 +2192,14 @@ fn fps_control(
                 .py_1()
                 .rounded_md()
                 .bg(if open { rgb(0x2f6fed) } else { rgb(0x243041) })
+                .opacity(if locked { 0.55 } else { 1.0 })
                 .cursor_pointer()
                 .text_xs()
                 .child(selected.label())
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_menu(MenuKind::Fps, cx);
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if !locked {
+                        this.toggle_menu(MenuKind::Fps, cx);
+                    }
                 })),
         )
 }
