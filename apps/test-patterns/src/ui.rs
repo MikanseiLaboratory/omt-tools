@@ -8,10 +8,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, Focusable, Font, FontFallbacks, FontFeatures,
-    FontStyle, FontWeight, InteractiveElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    ObjectFit, RenderImage, SharedString, Timer, Window, WindowBounds, WindowOptions, div, img,
-    prelude::*, px, rgb, size,
+    App, Application, Bounds, ClickEvent, Context, FocusHandle, Focusable, Font, FontFallbacks,
+    FontFeatures, FontStyle, FontWeight, InteractiveElement, KeyDownEvent, MouseButton,
+    MouseDownEvent, ObjectFit, RenderImage, SharedString, Timer, Window, WindowBounds,
+    WindowOptions, div, img, prelude::*, px, rgb, size,
 };
 use image::{Frame, ImageBuffer, Rgba};
 use omt_media::{
@@ -32,9 +32,9 @@ const THUMB_W: i32 = 320;
 const THUMB_H: i32 = 180;
 const PREVIEW_W: i32 = 240;
 const PREVIEW_H: i32 = 135;
-const GRID_COLS: usize = 4;
 const TILE_W: f32 = 220.0;
 const SIDE_PANEL_W: f32 = 360.0;
+const SIDE_PANEL_MIN_W: f32 = 240.0;
 /// Bottom padding under the output preview so it is not flush with the window edge.
 const PREVIEW_BOTTOM_MARGIN: f32 = 10.0;
 
@@ -352,7 +352,8 @@ struct PatternsView {
     preview_phase_y: f32,
     last_preview_at: Instant,
     window_title: SharedString,
-    open_menu: Option<MenuKind>,
+    /// Open dropdown and its window-relative left anchor (survives control-bar wrap).
+    open_menu: Option<(MenuKind, f32)>,
     /// Right-click menu: image index and window-relative anchor.
     custom_menu: Option<(usize, f32, f32)>,
     /// Pending native file dialog result (must not block the GPUI UI thread).
@@ -837,13 +838,13 @@ impl PatternsView {
         cx.notify();
     }
 
-    fn toggle_menu(&mut self, menu: MenuKind, cx: &mut Context<Self>) {
+    fn toggle_menu(&mut self, menu: MenuKind, anchor_x: f32, cx: &mut Context<Self>) {
         self.custom_menu = None;
         self.name_editing = false;
-        self.open_menu = if self.open_menu == Some(menu) {
+        self.open_menu = if self.open_menu.map(|(kind, _)| kind) == Some(menu) {
             None
         } else {
-            Some(menu)
+            Some((menu, anchor_x))
         };
         cx.notify();
     }
@@ -1054,22 +1055,34 @@ impl Render for PatternsView {
                         .flex()
                         .items_center()
                         .justify_between()
+                        .gap_3()
+                        .min_w_0()
                         .child(
                             div()
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_sm()
+                                .min_w_0()
+                                .flex_1()
+                                .truncate()
                                 .child(title),
                         )
-                        .child(div().text_xs().opacity(0.7).child(if sending {
-                            SharedString::from(t(language, "patterns.sending"))
-                        } else {
-                            SharedString::from(t(language, "patterns.idle"))
-                        })),
+                        .child(
+                            div()
+                                .text_xs()
+                                .opacity(0.7)
+                                .flex_shrink_0()
+                                .child(if sending {
+                                    SharedString::from(t(language, "patterns.sending"))
+                                } else {
+                                    SharedString::from(t(language, "patterns.idle"))
+                                }),
+                        ),
                 )
                 .child(
                     div()
                         .flex_1()
                         .min_h_0()
+                        .min_w_0()
                         .flex()
                         .flex_row()
                         // Pattern grid
@@ -1094,7 +1107,11 @@ impl Render for PatternsView {
                         .child(
                             div()
                                 .w(px(SIDE_PANEL_W))
+                                .min_w(px(SIDE_PANEL_MIN_W))
+                                .max_w_full()
+                                .flex_shrink()
                                 .h_full()
+                                .min_h_0()
                                 .id("side-panel")
                                 .overflow_y_scroll()
                                 .p_3()
@@ -1180,15 +1197,20 @@ impl Render for PatternsView {
                                 )),
                         ),
                 )
-                // Bottom control bar
+                // Bottom control bar — wrap to the viewport; scroll horizontally if still tight.
                 .child(
                     div()
+                        .id("bottom-bar")
                         .px_4()
                         .pt_3()
                         .pb(px(PREVIEW_BOTTOM_MARGIN))
                         .gap_4()
                         .flex()
+                        .flex_row()
+                        .flex_wrap()
                         .items_end()
+                        .min_w_0()
+                        .overflow_x_scroll()
                         .border_t_1()
                         .border_color(rgb(0x2a3340))
                         .bg(rgb(0x12161c))
@@ -1197,19 +1219,19 @@ impl Render for PatternsView {
                             language,
                             width,
                             height,
-                            open_menu == Some(MenuKind::Resolution),
+                            open_menu.map(|(kind, _)| kind) == Some(MenuKind::Resolution),
                         ))
                         .child(tone_control(
                             cx,
                             language,
                             tone_hz,
-                            open_menu == Some(MenuKind::Tone),
+                            open_menu.map(|(kind, _)| kind) == Some(MenuKind::Tone),
                         ))
                         .child(fps_control(
                             cx,
                             language,
                             frame_rate,
-                            open_menu == Some(MenuKind::Fps),
+                            open_menu.map(|(kind, _)| kind) == Some(MenuKind::Fps),
                         ))
                         .child(frame_buffer_control(cx, language, frame_buffer_frames))
                         .child(quality_control(cx, language, quality))
@@ -1217,10 +1239,10 @@ impl Render for PatternsView {
                             cx,
                             language,
                             level_dbfs,
-                            open_menu == Some(MenuKind::Level),
+                            open_menu.map(|(kind, _)| kind) == Some(MenuKind::Level),
                         ))
                         .child(transport_controls(cx, language, sending))
-                        .child(div().flex_1())
+                        .child(div().flex_1().min_w(px(0.0)))
                         .child(output_preview(language, preview)),
                 );
 
@@ -1247,7 +1269,7 @@ impl Render for PatternsView {
 fn overlay_layer(
     cx: &mut Context<PatternsView>,
     language: Language,
-    open_menu: Option<MenuKind>,
+    open_menu: Option<(MenuKind, f32)>,
     tone_hz: f32,
     frame_rate: FrameRate,
     level_dbfs: f32,
@@ -1275,20 +1297,20 @@ fn overlay_layer(
             }),
         );
 
-    if let Some(menu) = open_menu {
-        // Footer control left edges (padding 16 + cumulative widths + gap 16).
-        let (left, menu_width) = match menu {
-            MenuKind::Resolution => (px(16.0), px(168.0)),
-            MenuKind::Tone => (px(148.0), px(160.0)),
-            MenuKind::Fps => (px(304.0), px(100.0)),
-            // After FPS, frame-buffer stepper (~90px), and quality segmented control (~130px).
-            MenuKind::Level => (px(644.0), px(120.0)),
+    if let Some((menu, anchor_x)) = open_menu {
+        let menu_width = match menu {
+            MenuKind::Resolution => 168.0,
+            MenuKind::Tone => 160.0,
+            MenuKind::Fps => 100.0,
+            MenuKind::Level => 120.0,
         };
+        // Keep the menu near the control that opened it, even when the footer wraps.
+        let left = (anchor_x - 8.0).max(8.0);
         let menu_div = div()
             .absolute()
-            .w(menu_width)
+            .w(px(menu_width))
             .bottom(px(72.0))
-            .left(left)
+            .left(px(left))
             .p_1()
             .rounded_md()
             .border_1()
@@ -1486,53 +1508,21 @@ fn pattern_grid(
     thumbs: Vec<(PatternKind, Option<Arc<RenderImage>>)>,
     custom_images: Vec<(usize, PathBuf, Option<Arc<RenderImage>>)>,
 ) -> impl IntoElement {
-    let mut children: Vec<gpui::AnyElement> = Vec::new();
-
-    for chunk in thumbs.chunks(GRID_COLS) {
-        let cells: Vec<_> = chunk
-            .iter()
-            .map(|(kind, thumb)| {
-                let kind = *kind;
-                let is_selected = selected != PatternKind::Image && kind == selected;
-                pattern_tile(
-                    cx,
-                    SharedString::from(kind.id()),
-                    SharedString::from(pattern_label(language, kind)),
-                    thumb.clone(),
-                    is_selected,
-                    move |this, cx| this.select_pattern(kind, cx),
-                    None::<fn(&mut PatternsView, &MouseDownEvent, &mut Context<PatternsView>)>,
-                )
-            })
-            .collect();
-        children.push(
-            div()
-                .flex()
-                .flex_row()
-                .gap_4()
-                .mb_4()
-                .children(cells)
-                .into_any_element(),
-        );
-    }
-
-    children.push(
-        div()
-            .mt_2()
-            .mb_3()
-            .h(px(1.0))
-            .bg(rgb(0x2a3340))
-            .into_any_element(),
-    );
-    children.push(
-        div()
-            .mb_3()
-            .text_xs()
-            .font_weight(FontWeight::SEMIBOLD)
-            .opacity(0.7)
-            .child(t(language, "patterns.image"))
-            .into_any_element(),
-    );
+    let pattern_tiles: Vec<_> = thumbs
+        .into_iter()
+        .map(|(kind, thumb)| {
+            let is_selected = selected != PatternKind::Image && kind == selected;
+            pattern_tile(
+                cx,
+                SharedString::from(kind.id()),
+                SharedString::from(pattern_label(language, kind)),
+                thumb,
+                is_selected,
+                move |this, cx| this.select_pattern(kind, cx),
+                None::<fn(&mut PatternsView, &MouseDownEvent, &mut Context<PatternsView>)>,
+            )
+        })
+        .collect();
 
     let mut custom_cells: Vec<gpui::AnyElement> = custom_images
         .into_iter()
@@ -1560,21 +1550,35 @@ fn pattern_grid(
 
     custom_cells.push(add_image_tile(cx, language));
 
-    while !custom_cells.is_empty() {
-        let take = custom_cells.len().min(GRID_COLS);
-        let row: Vec<_> = custom_cells.drain(..take).collect();
-        children.push(
+    div()
+        .flex()
+        .flex_col()
+        .min_w_0()
+        .child(
             div()
                 .flex()
                 .flex_row()
+                .flex_wrap()
                 .gap_4()
-                .mb_4()
-                .children(row)
-                .into_any_element(),
-        );
-    }
-
-    div().flex().flex_col().children(children)
+                .children(pattern_tiles),
+        )
+        .child(div().mt_2().mb_3().h(px(1.0)).bg(rgb(0x2a3340)))
+        .child(
+            div()
+                .mb_3()
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .opacity(0.7)
+                .child(t(language, "patterns.image")),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .gap_4()
+                .children(custom_cells),
+        )
 }
 
 fn pattern_tile<FSelect, FMenu>(
@@ -1594,6 +1598,7 @@ where
     let mut tile = div()
         .id(id)
         .w(px(TILE_W))
+        .flex_shrink_0()
         .flex()
         .flex_col()
         .gap_1()
@@ -1628,7 +1633,14 @@ where
                         .into_any_element()
                 }),
         )
-        .child(div().text_sm().text_center().child(label))
+        .child(
+            div()
+                .text_sm()
+                .text_center()
+                .w_full()
+                .truncate()
+                .child(label),
+        )
         .on_click(cx.listener(move |this, _, _, cx| {
             select(this, cx);
         }));
@@ -1650,6 +1662,7 @@ fn add_image_tile(cx: &mut Context<PatternsView>, language: Language) -> gpui::A
     div()
         .id("add-custom-image")
         .w(px(TILE_W))
+        .flex_shrink_0()
         .flex()
         .flex_col()
         .gap_1()
@@ -1694,6 +1707,7 @@ fn tone_control(
         .flex()
         .flex_col()
         .gap_1()
+        .flex_shrink_0()
         .child(
             div()
                 .text_xs()
@@ -1711,8 +1725,9 @@ fn tone_control(
                 .cursor_pointer()
                 .text_xs()
                 .child(tone_label(language, tone_hz))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_menu(MenuKind::Tone, cx);
+                .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
+                    let x: f32 = event.position().x.into();
+                    this.toggle_menu(MenuKind::Tone, x, cx);
                 })),
         )
 }
@@ -1726,6 +1741,7 @@ fn transport_controls(
         .flex()
         .flex_col()
         .gap_1()
+        .flex_shrink_0()
         .child(div().text_xs().opacity(0.65).child(" "))
         .child(
             div()
@@ -1793,6 +1809,7 @@ fn name_field(
         .flex()
         .flex_col()
         .gap_1()
+        .min_w_0()
         .child(
             div()
                 .text_xs()
@@ -1814,6 +1831,8 @@ fn name_field(
                 .bg(rgb(0x0c1016))
                 .cursor_text()
                 .text_xs()
+                .min_w_0()
+                .truncate()
                 .child(display)
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.begin_edit_name(window, cx);
@@ -1832,6 +1851,7 @@ fn resolution_control(
         .flex()
         .flex_col()
         .gap_1()
+        .flex_shrink_0()
         .child(
             div()
                 .text_xs()
@@ -1849,8 +1869,9 @@ fn resolution_control(
                 .cursor_pointer()
                 .text_xs()
                 .child(format!("{width}×{height}"))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_menu(MenuKind::Resolution, cx);
+                .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
+                    let x: f32 = event.position().x.into();
+                    this.toggle_menu(MenuKind::Resolution, x, cx);
                 })),
         )
 }
@@ -1866,6 +1887,7 @@ fn level_control(
         .flex()
         .flex_col()
         .gap_1()
+        .flex_shrink_0()
         .child(
             div()
                 .text_xs()
@@ -1883,8 +1905,9 @@ fn level_control(
                 .cursor_pointer()
                 .text_xs()
                 .child(display)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_menu(MenuKind::Level, cx);
+                .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
+                    let x: f32 = event.position().x.into();
+                    this.toggle_menu(MenuKind::Level, x, cx);
                 })),
         )
 }
@@ -1905,7 +1928,16 @@ where
         .items_center()
         .justify_between()
         .gap_2()
-        .child(div().text_xs().opacity(0.65).child(label.to_string()))
+        .min_w_0()
+        .child(
+            div()
+                .text_xs()
+                .opacity(0.65)
+                .min_w_0()
+                .flex_1()
+                .truncate()
+                .child(label.to_string()),
+        )
         .child(
             div()
                 .id(SharedString::from(id))
@@ -1916,6 +1948,7 @@ where
                 .cursor_pointer()
                 .text_xs()
                 .font_weight(FontWeight::SEMIBOLD)
+                .flex_shrink_0()
                 .child(if active { "ON" } else { "OFF" })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     toggle(this, cx);
@@ -1940,12 +1973,22 @@ where
         .items_center()
         .justify_between()
         .gap_2()
-        .child(div().text_xs().opacity(0.65).child(label.to_string()))
+        .min_w_0()
+        .child(
+            div()
+                .text_xs()
+                .opacity(0.65)
+                .min_w_0()
+                .flex_1()
+                .truncate()
+                .child(label.to_string()),
+        )
         .child(
             div()
                 .flex()
                 .items_center()
                 .gap_1()
+                .flex_shrink_0()
                 .child(step_btn(
                     cx,
                     SharedString::from(format!("{id}-dec")),
@@ -2006,6 +2049,7 @@ fn frame_buffer_control(
         .flex()
         .flex_col()
         .gap_1()
+        .flex_shrink_0()
         .child(
             div()
                 .text_xs()
@@ -2045,6 +2089,7 @@ fn fps_control(
         .flex()
         .flex_col()
         .gap_1()
+        .flex_shrink_0()
         .child(
             div()
                 .text_xs()
@@ -2062,8 +2107,9 @@ fn fps_control(
                 .cursor_pointer()
                 .text_xs()
                 .child(selected.label())
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_menu(MenuKind::Fps, cx);
+                .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
+                    let x: f32 = event.position().x.into();
+                    this.toggle_menu(MenuKind::Fps, x, cx);
                 })),
         )
 }
@@ -2078,6 +2124,7 @@ fn quality_control(
         .flex()
         .flex_col()
         .gap_1()
+        .flex_shrink_0()
         .child(
             div()
                 .text_xs()
@@ -2114,6 +2161,7 @@ fn output_preview(language: Language, preview: Option<Arc<RenderImage>>) -> impl
         .flex_col()
         .items_end()
         .gap_1()
+        .flex_shrink_0()
         .child(
             div()
                 .text_xs()
