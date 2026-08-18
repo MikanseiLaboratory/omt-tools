@@ -171,6 +171,14 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::Japanese, "monitor.audio_system_default") => "既定",
         (Language::English, "monitor.audio_none") => "No output devices found",
         (Language::Japanese, "monitor.audio_none") => "出力デバイスが見つかりません",
+        (Language::English, "monitor.audio_unavailable") => "No audio output",
+        (Language::Japanese, "monitor.audio_unavailable") => "音声出力なし",
+        (Language::English, "monitor.audio_unavailable_hint") => {
+            "Video continues. Choose another output device in Settings."
+        }
+        (Language::Japanese, "monitor.audio_unavailable_hint") => {
+            "映像は再生を続けます。設定から別の出力デバイスを選んでください。"
+        }
         (Language::English, "monitor.av_buffer") => "A/V buffer",
         (Language::Japanese, "monitor.av_buffer") => "A/Vバッファ",
         (Language::English, "monitor.buffer_video") => "Video delay",

@@ -23,7 +23,7 @@ use parking_lot::Mutex;
 use pattern_generator::{PatternKind, fill_uyvy, scroll_uyvy, uyvy_from_image_path};
 use smallvec::smallvec;
 use suite_core::{
-    Language, SimdCapabilities, TestPatternsConfig, load_test_patterns_config,
+    Language, SimdCapabilities, TestPatternsConfig, TestPatternsQuality, load_test_patterns_config,
     reveal_in_file_manager, save_test_patterns_config, t,
 };
 
@@ -330,13 +330,20 @@ fn image_display_name(path: &Path) -> SharedString {
     )
 }
 
-fn persist_test_patterns_prefs(paths: &[PathBuf], frame_buffer_frames: u32) {
-    let cfg = TestPatternsConfig {
-        schema_version: 1,
-        custom_images: paths.to_vec(),
-        frame_buffer_frames: clamp_video_frame_buffer_frames(frame_buffer_frames) as u32,
-    };
-    let _ = save_test_patterns_config(&cfg);
+fn quality_from_config(quality: TestPatternsQuality) -> Quality {
+    match quality {
+        TestPatternsQuality::Low => Quality::Low,
+        TestPatternsQuality::Medium => Quality::Medium,
+        TestPatternsQuality::High => Quality::High,
+    }
+}
+
+fn quality_to_config(quality: Quality) -> TestPatternsQuality {
+    match quality {
+        Quality::Low => TestPatternsQuality::Low,
+        Quality::High => TestPatternsQuality::High,
+        Quality::Medium | Quality::Default => TestPatternsQuality::Medium,
+    }
 }
 
 pub fn run_gpui(title: String, language: Language) -> Result<()> {
@@ -411,10 +418,10 @@ impl PatternsView {
             .map(|kind| (kind, pattern_thumb(kind)))
             .collect();
 
-        let saved_cfg = load_test_patterns_config().unwrap_or_default();
+        let saved_cfg = load_test_patterns_config().unwrap_or_default().sanitized();
         let frame_buffer_frames =
             clamp_video_frame_buffer_frames(saved_cfg.frame_buffer_frames) as u32;
-        let saved = saved_cfg.custom_images;
+        let saved = saved_cfg.custom_images.clone();
         let saved_count = saved.len();
         let mut custom_images = Vec::new();
         let mut kept_paths = Vec::new();
@@ -426,26 +433,24 @@ impl PatternsView {
             kept_paths.push(path.clone());
             custom_images.push(CustomImage { path, thumb });
         }
-        if kept_paths.len() != saved_count {
-            persist_test_patterns_prefs(&kept_paths, frame_buffer_frames);
-        }
+        let pruned_images = kept_paths.len() != saved_count;
 
         let mut view = Self {
             language,
-            name: "Test Pattern".into(),
+            name: saved_cfg.name.clone(),
             kind: PatternKind::SmpteColorBars,
-            width: 1920,
-            height: 1080,
+            width: saved_cfg.width,
+            height: saved_cfg.height,
             frame_rate: FrameRate {
-                n: 30_000,
-                d: 1_001,
+                n: saved_cfg.fps_n,
+                d: saved_cfg.fps_d,
             },
-            quality: Quality::Medium,
-            animate: true,
-            anim_speed_h_pct: 100,
-            anim_speed_v_pct: 100,
-            tone_hz: 1000.0,
-            level_dbfs: -20.0,
+            quality: quality_from_config(saved_cfg.quality),
+            animate: saved_cfg.animate,
+            anim_speed_h_pct: saved_cfg.anim_speed_h_pct,
+            anim_speed_v_pct: saved_cfg.anim_speed_v_pct,
+            tone_hz: saved_cfg.tone_hz,
+            level_dbfs: saved_cfg.level_dbfs,
             sample_rate: 48_000,
             channels: 2,
             samples: 480,
@@ -455,9 +460,9 @@ impl PatternsView {
             session: None,
             live: Arc::new(Mutex::new(LivePattern::from_view(
                 PatternKind::SmpteColorBars,
-                true,
-                100,
-                100,
+                saved_cfg.animate,
+                saved_cfg.anim_speed_h_pct,
+                saved_cfg.anim_speed_v_pct,
                 None,
             ))),
             last_stats: SendStats::default(),
@@ -476,6 +481,9 @@ impl PatternsView {
             name_editing: false,
         };
         view.refresh_title();
+        if pruned_images {
+            view.persist_prefs();
+        }
         view.restart_session();
         view.refresh_preview(cx);
         view.schedule_tick(cx);
@@ -652,7 +660,7 @@ impl PatternsView {
             path,
             thumb: Some(thumb),
         });
-        self.persist_images();
+        self.persist_prefs();
         let index = self.custom_images.len() - 1;
         self.select_custom_image(index, cx);
     }
@@ -666,7 +674,7 @@ impl PatternsView {
         if let Some(thumb) = removed.thumb {
             cx.drop_image(thumb, None);
         }
-        self.persist_images();
+        self.persist_prefs();
 
         let was_selected =
             self.kind == PatternKind::Image && self.selected_custom.is_some_and(|i| i == index);
@@ -685,13 +693,28 @@ impl PatternsView {
         cx.notify();
     }
 
-    fn persist_images(&self) {
-        let paths: Vec<_> = self
-            .custom_images
-            .iter()
-            .map(|img| img.path.clone())
-            .collect();
-        persist_test_patterns_prefs(&paths, self.frame_buffer_frames);
+    fn persist_prefs(&self) {
+        let cfg = TestPatternsConfig {
+            schema_version: 1,
+            custom_images: self
+                .custom_images
+                .iter()
+                .map(|img| img.path.clone())
+                .collect(),
+            frame_buffer_frames: clamp_video_frame_buffer_frames(self.frame_buffer_frames) as u32,
+            name: self.name.clone(),
+            width: self.width,
+            height: self.height,
+            fps_n: self.frame_rate.n,
+            fps_d: self.frame_rate.d,
+            quality: quality_to_config(self.quality),
+            animate: self.animate,
+            anim_speed_h_pct: self.anim_speed_h_pct,
+            anim_speed_v_pct: self.anim_speed_v_pct,
+            tone_hz: self.tone_hz,
+            level_dbfs: self.level_dbfs,
+        };
+        let _ = save_test_patterns_config(&cfg.sanitized());
     }
 
     fn nudge_frame_buffer(&mut self, delta: i32, cx: &mut Context<Self>) {
@@ -704,7 +727,7 @@ impl PatternsView {
             return;
         }
         self.frame_buffer_frames = next;
-        self.persist_images();
+        self.persist_prefs();
         if let Some(session) = self.session.as_ref() {
             session.set_frame_buffer_frames(next);
         }
@@ -742,6 +765,7 @@ impl PatternsView {
         if self.name.trim().is_empty() {
             self.name = "Test Pattern".into();
         }
+        self.persist_prefs();
         cx.notify();
     }
 
@@ -764,6 +788,7 @@ impl PatternsView {
         let key = event.keystroke.key.as_str();
         if key == "backspace" {
             self.name.pop();
+            self.persist_prefs();
             cx.notify();
             return;
         }
@@ -776,6 +801,7 @@ impl PatternsView {
             && self.name.len() + ch.len() <= 64
         {
             self.name.push_str(ch);
+            self.persist_prefs();
             cx.notify();
         }
     }
@@ -789,6 +815,7 @@ impl PatternsView {
         }
         self.tone_hz = hz;
         self.push_live_audio();
+        self.persist_prefs();
         cx.notify();
     }
 
@@ -803,6 +830,7 @@ impl PatternsView {
             return;
         }
         self.frame_rate = frame_rate;
+        self.persist_prefs();
         cx.notify();
     }
 
@@ -819,6 +847,7 @@ impl PatternsView {
         self.width = resolution.width;
         self.height = resolution.height;
         self.refresh_title();
+        self.persist_prefs();
         cx.notify();
     }
 
@@ -836,6 +865,7 @@ impl PatternsView {
         }
         self.width = next;
         self.refresh_title();
+        self.persist_prefs();
         cx.notify();
     }
 
@@ -851,6 +881,7 @@ impl PatternsView {
         }
         self.height = next;
         self.refresh_title();
+        self.persist_prefs();
         cx.notify();
     }
 
@@ -862,6 +893,7 @@ impl PatternsView {
         }
         self.push_live_content(true);
         self.refresh_preview(cx);
+        self.persist_prefs();
         cx.notify();
     }
 
@@ -873,6 +905,7 @@ impl PatternsView {
         }
         self.anim_speed_h_pct = next;
         self.push_live_speeds();
+        self.persist_prefs();
         cx.notify();
     }
 
@@ -884,6 +917,7 @@ impl PatternsView {
         }
         self.anim_speed_v_pct = next;
         self.push_live_speeds();
+        self.persist_prefs();
         cx.notify();
     }
 
@@ -896,6 +930,7 @@ impl PatternsView {
         }
         self.level_dbfs = dbfs;
         self.push_live_audio();
+        self.persist_prefs();
         cx.notify();
     }
 
@@ -925,6 +960,7 @@ impl PatternsView {
         if let Some(session) = self.session.as_ref() {
             session.set_quality(quality);
         }
+        self.persist_prefs();
         cx.notify();
     }
 
@@ -935,6 +971,7 @@ impl PatternsView {
         if self.name.trim().is_empty() {
             self.name = "Test Pattern".into();
         }
+        self.persist_prefs();
         self.restart_session();
         cx.notify();
     }
@@ -1955,10 +1992,12 @@ fn name_field(
     } else {
         name.to_string()
     };
+    // Avoid `.truncate()`: without a definite width it replaces the name with an ellipsis.
     div()
         .flex()
         .flex_col()
         .gap_1()
+        .w_full()
         .min_w_0()
         .child(
             div()
@@ -1969,6 +2008,7 @@ fn name_field(
         .child(
             div()
                 .id("source-name")
+                .w_full()
                 .px_2()
                 .py_1()
                 .rounded_md()
@@ -1982,8 +2022,6 @@ fn name_field(
                 .opacity(if locked { 0.55 } else { 1.0 })
                 .cursor_text()
                 .text_xs()
-                .min_w_0()
-                .truncate()
                 .child(display)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if !locked {
