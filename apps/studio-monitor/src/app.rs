@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use eframe::egui::{self, Context, Pos2, TextureHandle, TextureOptions};
 use omt_media::{
-    AudioLevels, AudioOutputDevice, BufferUnit, ConnectOptions, DelaySetting, DiscoveredSource,
-    ReceiveWorker, SessionState, StallState, list_output_devices, spawn_discover,
+    AudioLevels, AudioOutputDevice, AudioOutputStatus, BufferUnit, ConnectOptions, DelaySetting,
+    DiscoveredSource, ReceiveWorker, SessionState, StallState, list_output_devices, spawn_discover,
 };
 use suite_core::{
     Language, SUITE_VERSION, SimdCapabilities, StudioMonitorConfig, ThemePreference,
@@ -622,6 +622,10 @@ impl MonitorApp {
         }
     }
 
+    fn audio_unavailable(&self) -> bool {
+        matches!(self.worker.audio().status(), AudioOutputStatus::Unavailable)
+    }
+
     fn open_preferences(&mut self) {
         self.preferences_open = true;
         self.audio_devices = list_output_devices();
@@ -799,6 +803,7 @@ impl eframe::App for MonitorApp {
                 &self.settings,
                 &self.audio_devices,
                 self.audio_output_device.as_deref(),
+                self.audio_unavailable(),
                 self.settings.buffer,
                 self.video_buffer_delay_ms,
                 self.audio_buffer_delay_ms,

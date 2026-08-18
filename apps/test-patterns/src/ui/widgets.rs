@@ -679,10 +679,12 @@ pub(crate) fn name_field(
     } else {
         name.to_string()
     };
+    // Avoid `.truncate()`: without a definite width it replaces the name with an ellipsis.
     div()
         .flex()
         .flex_col()
         .gap_1()
+        .w_full()
         .min_w_0()
         .child(
             div()
@@ -693,6 +695,7 @@ pub(crate) fn name_field(
         .child(
             div()
                 .id("source-name")
+                .w_full()
                 .px_2()
                 .py_1()
                 .rounded_md()
@@ -706,8 +709,6 @@ pub(crate) fn name_field(
                 .opacity(if locked { 0.55 } else { 1.0 })
                 .cursor_text()
                 .text_xs()
-                .min_w_0()
-                .truncate()
                 .child(display)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if !locked {

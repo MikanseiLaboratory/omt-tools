@@ -78,11 +78,22 @@ fn persist_test_patterns_prefs(view: &PatternsView) {
             .map(|img| img.path.clone())
             .collect(),
         frame_buffer_frames: clamp_video_frame_buffer_frames(view.frame_buffer_frames) as u32,
+        name: view.name.clone(),
+        width: view.width,
+        height: view.height,
+        fps_n: view.frame_rate.n,
+        fps_d: view.frame_rate.d,
+        quality: quality_to_config(view.quality),
+        animate: view.animate,
+        anim_speed_h_pct: view.anim_speed_h_pct,
+        anim_speed_v_pct: view.anim_speed_v_pct,
+        tone_hz: view.tone_hz,
+        level_dbfs: view.level_dbfs,
         side_panel_w: clamp_side_panel_w(view.side_panel_w).round() as u32,
         stats_open: view.stats_open,
         settings_open: view.settings_open,
     };
-    let _ = save_test_patterns_config(&cfg);
+    let _ = save_test_patterns_config(&cfg.sanitized());
 }
 
 pub fn run_gpui(title: String, language: Language) -> Result<()> {
@@ -162,10 +173,10 @@ impl PatternsView {
             .map(|kind| (kind, pattern_thumb(kind)))
             .collect();
 
-        let saved_cfg = load_test_patterns_config().unwrap_or_default();
+        let saved_cfg = load_test_patterns_config().unwrap_or_default().sanitized();
         let frame_buffer_frames =
             clamp_video_frame_buffer_frames(saved_cfg.frame_buffer_frames) as u32;
-        let saved = saved_cfg.custom_images;
+        let saved = saved_cfg.custom_images.clone();
         let saved_count = saved.len();
         let mut custom_images = Vec::new();
         let mut kept_paths = Vec::new();
@@ -177,23 +188,24 @@ impl PatternsView {
             kept_paths.push(path.clone());
             custom_images.push(CustomImage { path, thumb });
         }
+        let pruned_images = kept_paths.len() != saved_count;
 
         let mut view = Self {
             language,
-            name: "Test Pattern".into(),
+            name: saved_cfg.name.clone(),
             kind: PatternKind::SmpteColorBars,
-            width: 1920,
-            height: 1080,
+            width: saved_cfg.width,
+            height: saved_cfg.height,
             frame_rate: FrameRate {
-                n: 30_000,
-                d: 1_001,
+                n: saved_cfg.fps_n,
+                d: saved_cfg.fps_d,
             },
-            quality: Quality::Medium,
-            animate: true,
-            anim_speed_h_pct: 100,
-            anim_speed_v_pct: 100,
-            tone_hz: 1000.0,
-            level_dbfs: -20.0,
+            quality: quality_from_config(saved_cfg.quality),
+            animate: saved_cfg.animate,
+            anim_speed_h_pct: saved_cfg.anim_speed_h_pct,
+            anim_speed_v_pct: saved_cfg.anim_speed_v_pct,
+            tone_hz: saved_cfg.tone_hz,
+            level_dbfs: saved_cfg.level_dbfs,
             sample_rate: 48_000,
             channels: 2,
             samples: 480,
@@ -203,9 +215,9 @@ impl PatternsView {
             session: None,
             live: Arc::new(Mutex::new(LivePattern::from_view(
                 PatternKind::SmpteColorBars,
-                true,
-                100,
-                100,
+                saved_cfg.animate,
+                saved_cfg.anim_speed_h_pct,
+                saved_cfg.anim_speed_v_pct,
                 None,
             ))),
             last_stats: SendStats::default(),
@@ -228,7 +240,7 @@ impl PatternsView {
             resize_drag_x: None,
         };
         view.refresh_title();
-        if kept_paths.len() != saved_count {
+        if pruned_images {
             persist_test_patterns_prefs(&view);
         }
         view.restart_session();
@@ -514,6 +526,7 @@ impl PatternsView {
         let key = event.keystroke.key.as_str();
         if key == "backspace" {
             self.name.pop();
+            self.persist_images();
             cx.notify();
             return;
         }
@@ -526,6 +539,7 @@ impl PatternsView {
             && self.name.len() + ch.len() <= 64
         {
             self.name.push_str(ch);
+            self.persist_images();
             cx.notify();
         }
     }
@@ -539,6 +553,7 @@ impl PatternsView {
         }
         self.tone_hz = hz;
         self.push_live_audio();
+        self.persist_images();
         cx.notify();
     }
 
@@ -553,6 +568,7 @@ impl PatternsView {
             return;
         }
         self.frame_rate = frame_rate;
+        self.persist_images();
         cx.notify();
     }
 
@@ -569,6 +585,7 @@ impl PatternsView {
         self.width = resolution.width;
         self.height = resolution.height;
         self.refresh_title();
+        self.persist_images();
         cx.notify();
     }
 
@@ -586,6 +603,7 @@ impl PatternsView {
         }
         self.width = next;
         self.refresh_title();
+        self.persist_images();
         cx.notify();
     }
 
@@ -601,6 +619,7 @@ impl PatternsView {
         }
         self.height = next;
         self.refresh_title();
+        self.persist_images();
         cx.notify();
     }
 
@@ -612,6 +631,7 @@ impl PatternsView {
         }
         self.push_live_content(true);
         self.refresh_preview(cx);
+        self.persist_images();
         cx.notify();
     }
 
@@ -623,6 +643,7 @@ impl PatternsView {
         }
         self.anim_speed_h_pct = next;
         self.push_live_speeds();
+        self.persist_images();
         cx.notify();
     }
 
@@ -634,6 +655,7 @@ impl PatternsView {
         }
         self.anim_speed_v_pct = next;
         self.push_live_speeds();
+        self.persist_images();
         cx.notify();
     }
 
@@ -646,6 +668,7 @@ impl PatternsView {
         }
         self.level_dbfs = dbfs;
         self.push_live_audio();
+        self.persist_images();
         cx.notify();
     }
 
@@ -675,6 +698,7 @@ impl PatternsView {
         if let Some(session) = self.session.as_ref() {
             session.set_quality(quality);
         }
+        self.persist_images();
         cx.notify();
     }
 
@@ -685,6 +709,7 @@ impl PatternsView {
         if self.name.trim().is_empty() {
             self.name = "Test Pattern".into();
         }
+        self.persist_images();
         self.restart_session();
         cx.notify();
     }

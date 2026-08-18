@@ -8,7 +8,7 @@ use image::{Frame, ImageBuffer, Rgba};
 use openmediatransport::{Quality, uyvy_to_rgba};
 use pattern_generator::{PatternKind, fill_uyvy};
 use smallvec::smallvec;
-use suite_core::{Language, t};
+use suite_core::{Language, TestPatternsQuality, t};
 
 pub(crate) const THUMB_W: i32 = 320;
 pub(crate) const THUMB_H: i32 = 180;
@@ -266,6 +266,22 @@ pub(crate) fn quality_label(quality: Quality) -> &'static str {
         Quality::Low => "LQ",
         Quality::High => "HQ",
         Quality::Medium | Quality::Default => "SQ",
+    }
+}
+
+pub(crate) fn quality_from_config(quality: TestPatternsQuality) -> Quality {
+    match quality {
+        TestPatternsQuality::Low => Quality::Low,
+        TestPatternsQuality::Medium => Quality::Medium,
+        TestPatternsQuality::High => Quality::High,
+    }
+}
+
+pub(crate) fn quality_to_config(quality: Quality) -> TestPatternsQuality {
+    match quality {
+        Quality::Low => TestPatternsQuality::Low,
+        Quality::High => TestPatternsQuality::High,
+        Quality::Medium | Quality::Default => TestPatternsQuality::Medium,
     }
 }
 

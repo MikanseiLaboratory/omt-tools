@@ -192,6 +192,12 @@ impl MonitorApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
                     ui.label(RichText::new(&self.stall_text).color(chrome.text));
+                    if self.audio_unavailable() {
+                        ui.label(
+                            RichText::new(t(self.language, "monitor.audio_unavailable"))
+                                .color(chrome.text),
+                        );
+                    }
                     ui.label(
                         RichText::new(format!("{:.0}%", self.zoom * 100.0)).color(chrome.text),
                     );
@@ -200,9 +206,6 @@ impl MonitorApp {
                     }
                     if chip(ui, chrome, t(self.language, "monitor.fullscreen"), false) {
                         self.enter_fullscreen(ui.ctx());
-                    }
-                    if chip(ui, chrome, t(self.language, "monitor.preferences"), false) {
-                        self.open_preferences();
                     }
                     ui.label(
                         RichText::new(
@@ -311,18 +314,12 @@ impl MonitorApp {
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     ui.add_space(12.0);
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new(t(self.language, "monitor.preferences"))
-                                    .color(chrome.text),
-                            )
-                            .fill(chrome.surface)
-                            .corner_radius(6.0)
-                            .min_size(Vec2::new(ui.available_width(), 36.0)),
-                        )
-                        .clicked()
-                    {
+                    if prefs_button(
+                        ui,
+                        chrome,
+                        t(self.language, "monitor.preferences"),
+                        self.preferences_open,
+                    ) {
                         self.open_preferences();
                     }
                     ui.add_space(10.0);
@@ -447,6 +444,18 @@ impl MonitorApp {
                             self.persist_monitor_layout();
                         }
                         if self.stats_audio_open {
+                            stat_row(
+                                ui,
+                                chrome,
+                                t(self.language, "monitor.audio_output"),
+                                if self.audio_unavailable() {
+                                    t(self.language, "monitor.audio_unavailable").to_string()
+                                } else {
+                                    self.audio_output_device.clone().unwrap_or_else(|| {
+                                        t(self.language, "monitor.audio_default").to_string()
+                                    })
+                                },
+                            );
                             stat_row(
                                 ui,
                                 chrome,
@@ -612,6 +621,67 @@ fn collapsing_label(ui: &mut Ui, chrome: UiChrome, title: &str, open: bool) -> b
         .sense(Sense::click()),
     );
     if resp.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    resp.clicked()
+}
+
+fn paint_gear(painter: &egui::Painter, center: Pos2, size: f32, color: Color32) {
+    let stroke_w = (size * 0.12).clamp(1.4, 2.2);
+    let r_ring = size * 0.28;
+    painter.circle_stroke(center, r_ring, egui::Stroke::new(stroke_w, color));
+    let tooth_inner = r_ring + stroke_w * 0.3;
+    let tooth_outer = size * 0.46;
+    for i in 0..8 {
+        let a = i as f32 * std::f32::consts::TAU / 8.0;
+        let (sin, cos) = a.sin_cos();
+        let dir = Vec2::new(cos, sin);
+        painter.line_segment(
+            [center + dir * tooth_inner, center + dir * tooth_outer],
+            egui::Stroke::new(stroke_w * 1.15, color),
+        );
+    }
+}
+
+fn prefs_button(ui: &mut Ui, chrome: UiChrome, label: &str, active: bool) -> bool {
+    let height = 36.0;
+    let (rect, resp) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
+    let hovered = resp.hovered();
+    let fill = if active {
+        chrome.accent_soft
+    } else if hovered {
+        chrome.surface_active
+    } else {
+        chrome.surface
+    };
+    let stroke = if active { chrome.accent } else { chrome.border };
+    let text_color = if active { chrome.accent } else { chrome.text };
+    let icon_color = if active || hovered {
+        chrome.accent
+    } else {
+        chrome.text_muted
+    };
+
+    ui.painter().rect_filled(rect, 6.0, fill);
+    ui.painter().rect_stroke(
+        rect,
+        6.0,
+        egui::Stroke::new(1.0, stroke),
+        egui::StrokeKind::Inside,
+    );
+
+    let icon_center = Pos2::new(rect.min.x + 18.0, rect.center().y);
+    paint_gear(ui.painter(), icon_center, 18.0, icon_color);
+    ui.painter().text(
+        Pos2::new(rect.min.x + 34.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(13.0),
+        text_color,
+    );
+
+    if hovered {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
     resp.clicked()

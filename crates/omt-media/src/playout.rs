@@ -364,7 +364,12 @@ impl Playout {
 
     /// Nudge wall skew so the audio ring stays near the configured delay depth.
     fn steer_clock_to_audio_ring(&mut self, audio: &AudioOutput) {
-        if audio.playhead_pts().is_none() {
+        // Merely queueing PCM creates a playhead PTS. Only steer while the
+        // device callback is actually consuming samples; otherwise a missing
+        // or stalled output device winds the shared A/V clock backwards and
+        // freezes video after the initial buffered frames.
+        if !audio.playback_active() {
+            self.clock_skew_ticks = 0;
             return;
         }
         let target_ms = (self.audio_delay_ms() as f64).max(40.0);

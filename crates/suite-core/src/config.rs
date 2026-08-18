@@ -66,8 +66,21 @@ fn default_log_h() -> u32 {
     180
 }
 
+/// Encoding quality stored in Test Patterns preferences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TestPatternsQuality {
+    /// Low quality.
+    Low,
+    /// Medium / standard quality.
+    #[default]
+    Medium,
+    /// High quality.
+    High,
+}
+
 /// Test Patterns tool preferences (`test-patterns.json`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TestPatternsConfig {
     /// Schema version.
@@ -76,6 +89,28 @@ pub struct TestPatternsConfig {
     pub custom_images: Vec<PathBuf>,
     /// Prefetched video frames for paced OMT send (1..=16, default 3).
     pub frame_buffer_frames: u32,
+    /// Discoverable OMT source name.
+    pub name: String,
+    /// Output width in pixels.
+    pub width: i32,
+    /// Output height in pixels.
+    pub height: i32,
+    /// Frame rate numerator.
+    pub fps_n: i32,
+    /// Frame rate denominator.
+    pub fps_d: i32,
+    /// Encoding quality.
+    pub quality: TestPatternsQuality,
+    /// Whether pattern / image scroll animation is enabled.
+    pub animate: bool,
+    /// Horizontal scroll speed percent (−200..=200).
+    pub anim_speed_h_pct: i32,
+    /// Vertical scroll speed percent (−200..=200).
+    pub anim_speed_v_pct: i32,
+    /// Tone frequency in Hz; `0` means mute.
+    pub tone_hz: f32,
+    /// Tone peak level in dBFS.
+    pub level_dbfs: f32,
     /// Right side-panel width in logical pixels.
     #[serde(default = "default_side_panel_w")]
     pub side_panel_w: u32,
@@ -93,10 +128,55 @@ impl Default for TestPatternsConfig {
             schema_version: 1,
             custom_images: Vec::new(),
             frame_buffer_frames: 3,
+            name: "Test Pattern".into(),
+            width: 1920,
+            height: 1080,
+            fps_n: 30_000,
+            fps_d: 1_001,
+            quality: TestPatternsQuality::Medium,
+            animate: true,
+            anim_speed_h_pct: 100,
+            anim_speed_v_pct: 100,
+            tone_hz: 1000.0,
+            level_dbfs: -20.0,
             side_panel_w: default_side_panel_w(),
             stats_open: true,
             settings_open: true,
         }
+    }
+}
+
+impl TestPatternsConfig {
+    /// Clamp user-facing values into ranges the Test Patterns UI accepts.
+    pub fn sanitized(mut self) -> Self {
+        let trimmed = self.name.trim();
+        self.name = if trimmed.is_empty() {
+            "Test Pattern".into()
+        } else {
+            let mut name = trimmed.to_string();
+            while name.len() > 64 {
+                name.pop();
+            }
+            name
+        };
+        let width = self.width.clamp(64, 7680);
+        self.width = width - (width % 2);
+        self.height = self.height.clamp(64, 4320);
+        self.fps_n = self.fps_n.max(1);
+        self.fps_d = self.fps_d.max(1);
+        self.frame_buffer_frames = self.frame_buffer_frames.clamp(1, 16);
+        self.anim_speed_h_pct = self.anim_speed_h_pct.clamp(-200, 200);
+        self.anim_speed_v_pct = self.anim_speed_v_pct.clamp(-200, 200);
+        if self.tone_hz < 0.0 {
+            self.tone_hz = 0.0;
+        }
+        self.level_dbfs = self.level_dbfs.clamp(-120.0, 0.0);
+        if self.side_panel_w == 0 {
+            self.side_panel_w = default_side_panel_w();
+        } else {
+            self.side_panel_w = self.side_panel_w.clamp(240, 520);
+        }
+        self
     }
 }
 
@@ -243,9 +323,22 @@ mod tests {
     #[test]
     fn roundtrip_custom_images() {
         let cfg = TestPatternsConfig {
-            schema_version: 1,
             custom_images: vec![PathBuf::from("C:/images/bars.png")],
             frame_buffer_frames: 5,
+            name: "Cam A".into(),
+            width: 1280,
+            height: 720,
+            fps_n: 60,
+            fps_d: 1,
+            quality: TestPatternsQuality::High,
+            animate: false,
+            anim_speed_h_pct: 50,
+            anim_speed_v_pct: -20,
+            tone_hz: 440.0,
+            level_dbfs: -6.0,
+            side_panel_w: 400,
+            stats_open: false,
+            settings_open: false,
             ..Default::default()
         };
         let json = serde_json::to_string(&cfg).unwrap();
@@ -253,16 +346,69 @@ mod tests {
         assert_eq!(parsed.custom_images.len(), 1);
         assert_eq!(parsed.custom_images[0], PathBuf::from("C:/images/bars.png"));
         assert_eq!(parsed.frame_buffer_frames, 5);
+        assert_eq!(parsed.name, "Cam A");
+        assert_eq!(parsed.width, 1280);
+        assert_eq!(parsed.height, 720);
+        assert_eq!(parsed.fps_n, 60);
+        assert_eq!(parsed.fps_d, 1);
+        assert_eq!(parsed.quality, TestPatternsQuality::High);
+        assert!(!parsed.animate);
+        assert_eq!(parsed.anim_speed_h_pct, 50);
+        assert_eq!(parsed.anim_speed_v_pct, -20);
+        assert!((parsed.tone_hz - 440.0).abs() < f32::EPSILON);
+        assert!((parsed.level_dbfs + 6.0).abs() < f32::EPSILON);
+        assert_eq!(parsed.side_panel_w, 400);
+        assert!(!parsed.stats_open);
+        assert!(!parsed.settings_open);
     }
 
     #[test]
-    fn legacy_test_patterns_json_defaults_frame_buffer() {
+    fn legacy_test_patterns_json_defaults_new_fields() {
         let parsed: TestPatternsConfig =
             serde_json::from_str(r#"{"schema_version":1,"custom_images":[]}"#).unwrap();
         assert_eq!(parsed.frame_buffer_frames, 3);
+        assert_eq!(parsed.name, "Test Pattern");
+        assert_eq!(parsed.width, 1920);
+        assert_eq!(parsed.height, 1080);
+        assert_eq!(parsed.fps_n, 30_000);
+        assert_eq!(parsed.fps_d, 1_001);
+        assert_eq!(parsed.quality, TestPatternsQuality::Medium);
+        assert!(parsed.animate);
+        assert_eq!(parsed.anim_speed_h_pct, 100);
+        assert_eq!(parsed.anim_speed_v_pct, 100);
+        assert!((parsed.tone_hz - 1000.0).abs() < f32::EPSILON);
+        assert!((parsed.level_dbfs + 20.0).abs() < f32::EPSILON);
         assert_eq!(parsed.side_panel_w, 360);
         assert!(parsed.stats_open);
         assert!(parsed.settings_open);
+    }
+
+    #[test]
+    fn sanitizes_out_of_range_test_patterns_values() {
+        let parsed = TestPatternsConfig {
+            name: "  ".into(),
+            width: 1921,
+            height: 10,
+            fps_n: 0,
+            fps_d: 0,
+            anim_speed_h_pct: 999,
+            anim_speed_v_pct: -999,
+            tone_hz: -1.0,
+            level_dbfs: 12.0,
+            frame_buffer_frames: 99,
+            ..Default::default()
+        }
+        .sanitized();
+        assert_eq!(parsed.name, "Test Pattern");
+        assert_eq!(parsed.width, 1920);
+        assert_eq!(parsed.height, 64);
+        assert_eq!(parsed.fps_n, 1);
+        assert_eq!(parsed.fps_d, 1);
+        assert_eq!(parsed.anim_speed_h_pct, 200);
+        assert_eq!(parsed.anim_speed_v_pct, -200);
+        assert!((parsed.tone_hz - 0.0).abs() < f32::EPSILON);
+        assert!((parsed.level_dbfs - 0.0).abs() < f32::EPSILON);
+        assert_eq!(parsed.frame_buffer_frames, 16);
     }
 
     #[test]
