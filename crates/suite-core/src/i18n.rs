@@ -233,6 +233,12 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::Japanese, "patterns.stop") => "停止",
         (Language::English, "patterns.name") => "Source name",
         (Language::Japanese, "patterns.name") => "ソース名",
+        (Language::English, "patterns.restart_required") => {
+            "Stop sending to change the source name, resolution, or framerate."
+        }
+        (Language::Japanese, "patterns.restart_required") => {
+            "ソース名・解像度・フレームレートを変更するには送出を停止してください"
+        }
         (Language::English, "patterns.pattern") => "Pattern",
         (Language::Japanese, "patterns.pattern") => "パターン",
         (Language::English, "patterns.animate") => "Animate",
@@ -351,6 +357,7 @@ mod tests {
             "tool.test_patterns",
             "monitor.stalled",
             "patterns.start",
+            "patterns.restart_required",
         ];
         for key in keys {
             assert_ne!(t(Language::English, key), key, "missing en key {key}");

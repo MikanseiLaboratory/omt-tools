@@ -19,6 +19,7 @@ use omt_media::{
     SendSessionConfig, SendStats, clamp_video_frame_buffer_frames,
 };
 use openmediatransport::{Quality, uyvy_to_rgba};
+use parking_lot::Mutex;
 use pattern_generator::{PatternKind, fill_uyvy, uyvy_from_image_path};
 use smallvec::smallvec;
 use suite_core::{
@@ -28,6 +29,43 @@ use suite_core::{
 
 /// Frames for one full scroll cycle at ±100% animation speed.
 const ANIM_BASE_CYCLE_FRAMES: f32 = 300.0;
+
+/// Advance an independent scroll phase without resetting on speed changes.
+fn advance_scroll_phase(phase: f32, speed_pct: f32) -> f32 {
+    let step = speed_pct.clamp(-200.0, 200.0) / 100.0 / ANIM_BASE_CYCLE_FRAMES;
+    (phase + step).rem_euclid(1.0)
+}
+
+/// Live pattern pixels / animation, shared with the send provider.
+struct LivePattern {
+    kind: PatternKind,
+    image_uyvy: Option<Arc<Vec<u8>>>,
+    animate: bool,
+    speed_h: f32,
+    speed_v: f32,
+    phase_x: f32,
+    phase_y: f32,
+}
+
+impl LivePattern {
+    fn from_view(
+        kind: PatternKind,
+        animate: bool,
+        speed_h_pct: i32,
+        speed_v_pct: i32,
+        image_uyvy: Option<Arc<Vec<u8>>>,
+    ) -> Self {
+        Self {
+            kind,
+            image_uyvy,
+            animate: animate && kind != PatternKind::Image,
+            speed_h: speed_h_pct.clamp(-200, 200) as f32 / 100.0,
+            speed_v: speed_v_pct.clamp(-200, 200) as f32 / 100.0,
+            phase_x: 0.0,
+            phase_y: 0.0,
+        }
+    }
+}
 const THUMB_W: i32 = 320;
 const THUMB_H: i32 = 180;
 const PREVIEW_W: i32 = 240;
@@ -344,6 +382,7 @@ struct PatternsView {
     custom_images: Vec<CustomImage>,
     selected_custom: Option<usize>,
     session: Option<SendSession>,
+    live: Arc<Mutex<LivePattern>>,
     last_stats: SendStats,
     error: Option<SharedString>,
     thumbs: Vec<(PatternKind, Option<Arc<RenderImage>>)>,
@@ -412,6 +451,13 @@ impl PatternsView {
             custom_images,
             selected_custom: None,
             session: None,
+            live: Arc::new(Mutex::new(LivePattern::from_view(
+                PatternKind::SmpteColorBars,
+                true,
+                100,
+                100,
+                None,
+            ))),
             last_stats: SendStats::default(),
             error: None,
             thumbs,
@@ -458,14 +504,10 @@ impl PatternsView {
             );
             if self.last_preview_at.elapsed() >= frame_interval {
                 if self.animate {
-                    let step_h = self.anim_speed_h_pct.clamp(-200, 200) as f32
-                        / 100.0
-                        / ANIM_BASE_CYCLE_FRAMES;
-                    let step_v = self.anim_speed_v_pct.clamp(-200, 200) as f32
-                        / 100.0
-                        / ANIM_BASE_CYCLE_FRAMES;
-                    self.preview_phase_x = (self.preview_phase_x + step_h).rem_euclid(1.0);
-                    self.preview_phase_y = (self.preview_phase_y + step_v).rem_euclid(1.0);
+                    self.preview_phase_x =
+                        advance_scroll_phase(self.preview_phase_x, self.anim_speed_h_pct as f32);
+                    self.preview_phase_y =
+                        advance_scroll_phase(self.preview_phase_y, self.anim_speed_v_pct as f32);
                 }
                 self.refresh_preview(cx);
             }
@@ -511,7 +553,7 @@ impl PatternsView {
         }
         self.kind = kind;
         self.selected_custom = None;
-        self.apply_settings();
+        self.push_live_content(!self.animate);
         self.refresh_preview(cx);
         cx.notify();
     }
@@ -542,7 +584,7 @@ impl PatternsView {
         self.selected_custom = Some(index);
         self.kind = PatternKind::Image;
         self.error = None;
-        self.apply_settings();
+        self.push_live_content(true);
         cx.notify();
     }
 
@@ -635,7 +677,7 @@ impl PatternsView {
         if was_selected {
             self.selected_custom = None;
             self.kind = PatternKind::SmpteColorBars;
-            self.apply_settings();
+            self.push_live_content(!self.animate);
             self.refresh_preview(cx);
         }
         cx.notify();
@@ -661,7 +703,9 @@ impl PatternsView {
         }
         self.frame_buffer_frames = next;
         self.persist_images();
-        self.apply_settings();
+        if let Some(session) = self.session.as_ref() {
+            session.set_frame_buffer_frames(next);
+        }
         cx.notify();
     }
 
@@ -696,11 +740,14 @@ impl PatternsView {
         if self.name.trim().is_empty() {
             self.name = "Test Pattern".into();
         }
-        self.apply_settings();
         cx.notify();
     }
 
     fn begin_edit_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.session.is_some() {
+            cx.notify();
+            return;
+        }
         self.open_menu = None;
         self.custom_menu = None;
         self.name_editing = true;
@@ -739,35 +786,45 @@ impl PatternsView {
             return;
         }
         self.tone_hz = hz;
-        self.apply_settings();
+        self.push_live_audio();
         cx.notify();
     }
 
     fn set_frame_rate(&mut self, frame_rate: FrameRate, cx: &mut Context<Self>) {
         self.open_menu = None;
+        if self.session.is_some() {
+            cx.notify();
+            return;
+        }
         if self.frame_rate == frame_rate {
             cx.notify();
             return;
         }
         self.frame_rate = frame_rate;
-        self.apply_settings();
         cx.notify();
     }
 
     fn set_resolution(&mut self, resolution: Resolution, cx: &mut Context<Self>) {
         self.open_menu = None;
+        if self.session.is_some() {
+            cx.notify();
+            return;
+        }
         if self.width == resolution.width && self.height == resolution.height {
             cx.notify();
             return;
         }
         self.width = resolution.width;
         self.height = resolution.height;
-        self.apply_settings();
         self.refresh_title();
         cx.notify();
     }
 
     fn nudge_width(&mut self, delta: i32, cx: &mut Context<Self>) {
+        if self.session.is_some() {
+            cx.notify();
+            return;
+        }
         let next = (self.width + delta).clamp(64, 7680);
         // Keep even width for UYVY.
         let next = next - (next % 2);
@@ -776,19 +833,21 @@ impl PatternsView {
             return;
         }
         self.width = next;
-        self.apply_settings();
         self.refresh_title();
         cx.notify();
     }
 
     fn nudge_height(&mut self, delta: i32, cx: &mut Context<Self>) {
+        if self.session.is_some() {
+            cx.notify();
+            return;
+        }
         let next = (self.height + delta).clamp(64, 4320);
         if next == self.height {
             cx.notify();
             return;
         }
         self.height = next;
-        self.apply_settings();
         self.refresh_title();
         cx.notify();
     }
@@ -799,7 +858,7 @@ impl PatternsView {
             self.preview_phase_x = 0.0;
             self.preview_phase_y = 0.0;
         }
-        self.apply_settings();
+        self.push_live_content(true);
         self.refresh_preview(cx);
         cx.notify();
     }
@@ -811,7 +870,7 @@ impl PatternsView {
             return;
         }
         self.anim_speed_h_pct = next;
-        self.apply_settings();
+        self.push_live_speeds();
         cx.notify();
     }
 
@@ -822,7 +881,7 @@ impl PatternsView {
             return;
         }
         self.anim_speed_v_pct = next;
-        self.apply_settings();
+        self.push_live_speeds();
         cx.notify();
     }
 
@@ -834,13 +893,20 @@ impl PatternsView {
             return;
         }
         self.level_dbfs = dbfs;
-        self.apply_settings();
+        self.push_live_audio();
         cx.notify();
     }
 
     fn toggle_menu(&mut self, menu: MenuKind, anchor_x: f32, cx: &mut Context<Self>) {
         self.custom_menu = None;
         self.name_editing = false;
+        if self.session.is_some() && matches!(menu, MenuKind::Resolution | MenuKind::Fps) {
+            if self.open_menu.map(|(kind, _)| kind) == Some(menu) {
+                self.open_menu = None;
+            }
+            cx.notify();
+            return;
+        }
         self.open_menu = if self.open_menu.map(|(kind, _)| kind) == Some(menu) {
             None
         } else {
@@ -854,7 +920,9 @@ impl PatternsView {
             return;
         }
         self.quality = quality;
-        self.apply_settings();
+        if let Some(session) = self.session.as_ref() {
+            session.set_quality(quality);
+        }
         cx.notify();
     }
 
@@ -876,59 +944,113 @@ impl PatternsView {
         cx.notify();
     }
 
-    /// Restart the live session only when already sending.
-    fn apply_settings(&mut self) {
-        if self.session.is_some() {
-            self.restart_session();
-        }
-    }
-
     fn current_image_path(&self) -> Option<&Path> {
         self.selected_custom
             .and_then(|i| self.custom_images.get(i))
             .map(|img| img.path.as_path())
     }
 
-    fn restart_session(&mut self) {
-        self.stop();
-        self.error = None;
+    fn audio_config(&self) -> AudioToneConfig {
+        AudioToneConfig {
+            sample_rate: self.sample_rate,
+            channels: self.channels,
+            tone_hz: self.tone_hz,
+            level_dbfs: self.level_dbfs,
+            samples: self.samples,
+        }
+    }
 
-        let width = self.width;
-        let height = self.height;
-        let kind = self.kind;
-        let animate = self.animate;
-        let speed_h = self.anim_speed_h_pct.clamp(-200, 200) as f32 / 100.0;
-        let speed_v = self.anim_speed_v_pct.clamp(-200, 200) as f32 / 100.0;
-        let image_uyvy = if kind == PatternKind::Image {
-            match self.current_image_path() {
-                Some(path) => match uyvy_from_image_path(path, width, height) {
-                    Ok(buf) => Some(buf),
-                    Err(e) => {
-                        self.error = Some(SharedString::from(e.to_string()));
-                        return;
-                    }
-                },
-                None => {
-                    self.error = Some(SharedString::from("Select an image file first"));
-                    return;
+    fn load_image_uyvy(&self) -> std::result::Result<Arc<Vec<u8>>, SharedString> {
+        match self.current_image_path() {
+            Some(path) => match uyvy_from_image_path(path, self.width, self.height) {
+                Ok(buf) => Ok(Arc::new(buf)),
+                Err(e) => Err(SharedString::from(e.to_string())),
+            },
+            None => Err(SharedString::from("Select an image file first")),
+        }
+    }
+
+    /// Push pattern / image / animation into the shared provider state.
+    fn push_live_content(&mut self, invalidate_still: bool) -> bool {
+        let image_uyvy = if self.kind == PatternKind::Image {
+            match self.load_image_uyvy() {
+                Ok(buf) => Some(buf),
+                Err(e) => {
+                    self.error = Some(e);
+                    return false;
                 }
             }
         } else {
             None
         };
-
-        let provider: Arc<dyn Fn(u64) -> Vec<u8> + Send + Sync> = Arc::new(move |idx| {
-            if let Some(ref still) = image_uyvy {
-                return still.clone();
+        let animate = self.animate && self.kind != PatternKind::Image;
+        {
+            let mut live = self.live.lock();
+            live.kind = self.kind;
+            live.image_uyvy = image_uyvy;
+            live.animate = animate;
+            live.speed_h = self.anim_speed_h_pct.clamp(-200, 200) as f32 / 100.0;
+            live.speed_v = self.anim_speed_v_pct.clamp(-200, 200) as f32 / 100.0;
+            if !animate {
+                live.phase_x = 0.0;
+                live.phase_y = 0.0;
             }
-            let (phase_x, phase_y) = if animate {
-                let t = idx as f32;
-                (
-                    (t * speed_h / ANIM_BASE_CYCLE_FRAMES).rem_euclid(1.0),
-                    (t * speed_v / ANIM_BASE_CYCLE_FRAMES).rem_euclid(1.0),
-                )
-            } else {
-                (0.0, 0.0)
+        }
+        if let Some(session) = self.session.as_ref() {
+            session.set_animate(animate);
+            if invalidate_still || !animate {
+                session.invalidate_content();
+            }
+        }
+        true
+    }
+
+    fn push_live_speeds(&self) {
+        let mut live = self.live.lock();
+        live.speed_h = self.anim_speed_h_pct.clamp(-200, 200) as f32 / 100.0;
+        live.speed_v = self.anim_speed_v_pct.clamp(-200, 200) as f32 / 100.0;
+    }
+
+    fn push_live_audio(&self) {
+        if let Some(session) = self.session.as_ref() {
+            session.update_audio(self.audio_config());
+        }
+    }
+
+    fn restart_session(&mut self) {
+        self.stop();
+        self.error = None;
+        {
+            let mut live = self.live.lock();
+            live.phase_x = 0.0;
+            live.phase_y = 0.0;
+        }
+        if !self.push_live_content(true) {
+            return;
+        }
+
+        let width = self.width;
+        let height = self.height;
+        let live = Arc::clone(&self.live);
+        let provider: Arc<dyn Fn(u64) -> Vec<u8> + Send + Sync> = Arc::new(move |_idx| {
+            let (kind, phase_x, phase_y) = {
+                let mut state = live.lock();
+                if let Some(ref still) = state.image_uyvy {
+                    return still.as_ref().clone();
+                }
+                let kind = state.kind;
+                let (phase_x, phase_y) = if state.animate {
+                    let px = state.phase_x;
+                    let py = state.phase_y;
+                    state.phase_x =
+                        (state.phase_x + state.speed_h / ANIM_BASE_CYCLE_FRAMES).rem_euclid(1.0);
+                    state.phase_y =
+                        (state.phase_y + state.speed_v / ANIM_BASE_CYCLE_FRAMES).rem_euclid(1.0);
+                    (px, py)
+                } else {
+                    (0.0, 0.0)
+                };
+                (kind, phase_x, phase_y)
             };
             let mut buf = vec![0u8; (width as usize) * 2 * (height as usize)];
             fill_uyvy(kind, &mut buf, width, height, phase_x, phase_y);
@@ -944,13 +1066,7 @@ impl PatternsView {
             quality: self.quality,
             animate: self.animate && self.kind != PatternKind::Image,
             frame_buffer_frames: self.frame_buffer_frames,
-            audio: AudioToneConfig {
-                sample_rate: self.sample_rate,
-                channels: self.channels,
-                tone_hz: self.tone_hz,
-                level_dbfs: self.level_dbfs,
-                samples: self.samples,
-            },
+            audio: self.audio_config(),
         };
 
         match SendSession::start(config, provider) {
@@ -1171,7 +1287,13 @@ impl Render for PatternsView {
                                         .font_weight(FontWeight::BOLD)
                                         .child(t(language, "patterns.settings")),
                                 )
-                                .child(name_field(cx, language, &name, name_editing))
+                                .child(name_field(cx, language, &name, name_editing, sending))
+                                .children(sending.then(|| {
+                                    div()
+                                        .text_xs()
+                                        .text_color(rgb(0xf6c344))
+                                        .child(t(language, "patterns.restart_required"))
+                                }))
                                 .child(toggle_row(
                                     cx,
                                     "animate-toggle",
@@ -1220,6 +1342,7 @@ impl Render for PatternsView {
                             width,
                             height,
                             open_menu.map(|(kind, _)| kind) == Some(MenuKind::Resolution),
+                            sending,
                         ))
                         .child(tone_control(
                             cx,
@@ -1232,6 +1355,7 @@ impl Render for PatternsView {
                             language,
                             frame_rate,
                             open_menu.map(|(kind, _)| kind) == Some(MenuKind::Fps),
+                            sending,
                         ))
                         .child(frame_buffer_control(cx, language, frame_buffer_frames))
                         .child(quality_control(cx, language, quality))
@@ -1799,6 +1923,7 @@ fn name_field(
     language: Language,
     name: &str,
     editing: bool,
+    locked: bool,
 ) -> impl IntoElement {
     let display = if editing {
         format!("{name}|")
@@ -1829,13 +1954,16 @@ fn name_field(
                     rgb(0x2a3340)
                 })
                 .bg(rgb(0x0c1016))
+                .opacity(if locked { 0.55 } else { 1.0 })
                 .cursor_text()
                 .text_xs()
                 .min_w_0()
                 .truncate()
                 .child(display)
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.begin_edit_name(window, cx);
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if !locked {
+                        this.begin_edit_name(window, cx);
+                    }
                 })),
         )
 }
@@ -1846,6 +1974,7 @@ fn resolution_control(
     width: i32,
     height: i32,
     open: bool,
+    locked: bool,
 ) -> impl IntoElement {
     div()
         .flex()
@@ -1866,12 +1995,15 @@ fn resolution_control(
                 .py_1()
                 .rounded_md()
                 .bg(if open { rgb(0x2f6fed) } else { rgb(0x243041) })
+                .opacity(if locked { 0.55 } else { 1.0 })
                 .cursor_pointer()
                 .text_xs()
                 .child(format!("{width}×{height}"))
-                .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
-                    let x: f32 = event.position().x.into();
-                    this.toggle_menu(MenuKind::Resolution, x, cx);
+                .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                    if !locked {
+                        let x: f32 = event.position().x.into();
+                        this.toggle_menu(MenuKind::Resolution, x, cx);
+                    }
                 })),
         )
 }
@@ -2084,6 +2216,7 @@ fn fps_control(
     language: Language,
     selected: FrameRate,
     open: bool,
+    locked: bool,
 ) -> impl IntoElement {
     div()
         .flex()
@@ -2104,12 +2237,15 @@ fn fps_control(
                 .py_1()
                 .rounded_md()
                 .bg(if open { rgb(0x2f6fed) } else { rgb(0x243041) })
+                .opacity(if locked { 0.55 } else { 1.0 })
                 .cursor_pointer()
                 .text_xs()
                 .child(selected.label())
-                .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
-                    let x: f32 = event.position().x.into();
-                    this.toggle_menu(MenuKind::Fps, x, cx);
+                .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                    if !locked {
+                        let x: f32 = event.position().x.into();
+                        this.toggle_menu(MenuKind::Fps, x, cx);
+                    }
                 })),
         )
 }
@@ -2204,4 +2340,21 @@ fn stat_row(label: &str, value: String) -> impl IntoElement {
                 .text_right()
                 .child(value),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anim_speed_change_does_not_jump_phase() {
+        let start = 0.42;
+        let next_slow = advance_scroll_phase(start, 50.0);
+        let next_fast = advance_scroll_phase(start, 200.0);
+        let delta_slow = (next_slow - start).rem_euclid(1.0);
+        let delta_fast = (next_fast - start).rem_euclid(1.0);
+        assert!(delta_fast > delta_slow);
+        assert!(delta_fast < 0.02);
+        assert!((next_slow - start).abs() < 0.01);
+    }
 }

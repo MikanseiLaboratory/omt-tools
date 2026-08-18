@@ -6117,6 +6117,7 @@ dependencies = [
  "image",
  "omt-media",
  "openmediatransport",
+ "parking_lot",
  "pattern-generator",
  "rfd",
  "smallvec",
