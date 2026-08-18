@@ -350,6 +350,7 @@ pub fn run_gpui(title: String, language: Language) -> Result<()> {
                     title: Some(title.clone()),
                     ..Default::default()
                 }),
+                app_id: Some(suite_core::ToolId::TestPatterns.binary_name().into()),
                 ..Default::default()
             },
             move |_, cx| cx.new(|cx| PatternsView::new(cx, language)),

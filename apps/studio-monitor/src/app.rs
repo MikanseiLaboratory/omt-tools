@@ -47,7 +47,8 @@ pub fn run_eframe(
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1440.0, 860.0])
-            .with_title(title.clone()),
+            .with_title(title.clone())
+            .with_app_id(suite_core::ToolId::StudioMonitor.binary_name()),
         ..Default::default()
     };
     eframe::run_native(

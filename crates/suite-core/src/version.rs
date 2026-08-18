@@ -158,5 +158,10 @@ mod tests {
             ToolId::StudioMonitor.os_entry_name_qualified(),
             "OMT Studio Monitor"
         );
+        for tool in ToolId::all() {
+            assert!(!tool.os_entry_name().is_empty());
+            assert!(!tool.os_entry_name_qualified().is_empty());
+            assert!(tool.os_entry_name().len() <= 16);
+        }
     }
 }

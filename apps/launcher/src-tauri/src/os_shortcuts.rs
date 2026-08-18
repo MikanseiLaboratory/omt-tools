@@ -6,6 +6,7 @@
 //! - Linux: deb/rpm ship `.desktop` files; AppImage / portable builds write
 //!   `~/.local/share/applications/*.desktop` at first launch.
 
+#[cfg(any(test, target_os = "macos", target_os = "linux"))]
 use std::path::Path;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::path::PathBuf;
@@ -142,9 +143,14 @@ fn write_macos_wrapper(
     )
     .map_err(|e| e.to_string())?;
 
-    let launch = macos_dir.join("launch");
-    fs::write(&launch, macos_launch_script(sidecar)).map_err(|e| e.to_string())?;
-    set_executable(&launch)?;
+    // Keep the GUI process inside this .app so Launch Services / the menu bar
+    // read *this* Info.plist. A trampoline that `exec`s the sidecar in
+    // `OMT Tools.app` loses the wrapper identity and shows a blank app name.
+    let exe_name = tool.binary_name();
+    let exe_dest = macos_dir.join(exe_name);
+    let _ = fs::remove_file(macos_dir.join("launch"));
+    sync_file(sidecar, &exe_dest)?;
+    set_executable(&exe_dest)?;
 
     if let Some(icon) = icon {
         let dest = resources.join("AppIcon.icns");
@@ -158,8 +164,11 @@ fn write_macos_wrapper(
 
 #[cfg_attr(not(test), allow(dead_code))]
 fn macos_info_plist(tool: ToolId, version: &str) -> String {
-    let name = tool.os_entry_name_qualified();
-    let display = tool.os_entry_name();
+    // CFBundleName is the menu-bar title (Apple: prefer ≤16 chars).
+    // CFBundleDisplayName is the Dock / Launchpad label (qualified).
+    let name = tool.os_entry_name();
+    let display = tool.os_entry_name_qualified();
+    let exe = tool.binary_name();
     let id = tool.os_entry_id();
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -171,7 +180,7 @@ fn macos_info_plist(tool: ToolId, version: &str) -> String {
     <key>CFBundleDisplayName</key>
     <string>{display}</string>
     <key>CFBundleExecutable</key>
-    <string>launch</string>
+    <string>{exe}</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
@@ -196,17 +205,43 @@ fn macos_info_plist(tool: ToolId, version: &str) -> String {
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-fn macos_launch_script(sidecar: &Path) -> String {
-    let quoted = shell_single_quote(&sidecar.to_string_lossy());
-    format!(
-        "#!/bin/sh\nTARGET={quoted}\nif [ ! -x \"$TARGET\" ]; then\n  osascript -e 'display dialog \"OMT Tools is not installed.\" buttons {{\"OK\"}} default button 1 with icon stop'\n  exit 1\nfi\nexec \"$TARGET\" \"$@\"\n"
-    )
+/// Copy `src` → `dest` when missing or stale. Avoids hardlinks so ad-hoc
+/// signing the wrapper cannot rewrite the sidecar inside `OMT Tools.app`.
+#[cfg(target_os = "macos")]
+fn sync_file(src: &Path, dest: &Path) -> Result<(), String> {
+    use std::fs;
+    let need_copy = match (fs::metadata(src), fs::metadata(dest)) {
+        (Ok(src_meta), Ok(dest_meta)) => {
+            src_meta.len() != dest_meta.len()
+                || src_meta
+                    .modified()
+                    .ok()
+                    .zip(dest_meta.modified().ok())
+                    .map(|(src_t, dest_t)| src_t > dest_t)
+                    .unwrap_or(true)
+        }
+        (Ok(_), Err(_)) => true,
+        (Err(err), _) => return Err(err.to_string()),
+    };
+    if need_copy {
+        if dest.exists() {
+            fs::remove_file(dest).map_err(|e| e.to_string())?;
+        }
+        fs::copy(src, dest).map_err(|e| format!("copy sidecar into .app: {e}"))?;
+    }
+    Ok(())
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
+/// Packaged wrapper executable, if the launcher has already registered it.
+#[cfg(target_os = "macos")]
+pub fn macos_wrapped_executable(tool: ToolId) -> Option<PathBuf> {
+    home_dir().map(|home| {
+        home.join("Applications")
+            .join(format!("{}.app", tool.os_entry_name_qualified()))
+            .join("Contents")
+            .join("MacOS")
+            .join(tool.binary_name())
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -328,23 +363,24 @@ mod tests {
     fn plist_contains_bundle_id_and_executable() {
         let plist = macos_info_plist(ToolId::StudioMonitor, "0.1.0");
         assert!(plist.contains("lab.mikansei.omt-tools.studio-monitor"));
-        assert!(plist.contains("<string>launch</string>"));
-        assert!(plist.contains("OMT Studio Monitor"));
-    }
-
-    #[test]
-    fn launch_script_quotes_sidecar_path() {
-        let script = macos_launch_script(Path::new(
-            "/Applications/OMT Tools.app/Contents/MacOS/omt-studio-monitor",
-        ));
-        assert!(script.contains("'/Applications/OMT Tools.app/Contents/MacOS/omt-studio-monitor'"));
-        assert!(script.contains("exec \"$TARGET\""));
+        assert!(
+            plist
+                .contains("<key>CFBundleExecutable</key>\n    <string>omt-studio-monitor</string>")
+        );
+        assert!(
+            plist.contains(
+                "<key>CFBundleDisplayName</key>\n    <string>OMT Studio Monitor</string>"
+            )
+        );
+        assert!(plist.contains("<key>CFBundleName</key>\n    <string>Studio Monitor</string>"));
+        assert!(!plist.contains("<string>launch</string>"));
     }
 
     #[test]
     fn desktop_entry_uses_qualified_name() {
         let entry = linux_desktop_entry(ToolId::TestPatterns, "\"/opt/omt-test-patterns\"");
         assert!(entry.contains("Name=OMT Test Patterns"));
+        assert!(!entry.contains("Name=\n"));
         assert!(entry.contains("Exec=\"/opt/omt-test-patterns\""));
         assert!(entry.contains("StartupWMClass=omt-test-patterns"));
     }

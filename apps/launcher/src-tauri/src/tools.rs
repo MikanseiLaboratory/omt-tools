@@ -80,12 +80,24 @@ pub fn tool_available(app: &AppHandle, tool: ToolId) -> bool {
     resolve_tool_path(app, tool).is_ok()
 }
 
+fn resolve_launch_path(app: &AppHandle, tool: ToolId) -> Result<PathBuf, String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(wrapped) = crate::os_shortcuts::macos_wrapped_executable(tool) {
+            if wrapped.exists() {
+                return Ok(wrapped);
+            }
+        }
+    }
+    resolve_tool_path(app, tool)
+}
+
 /// Launch a tool with current suite language/theme overrides.
 pub fn launch_tool(app: &AppHandle, tool: ToolId) -> Result<(), String> {
     if tool == ToolId::ScreenCapture {
         return Err("Screen Capture is not enabled in this suite build".into());
     }
-    let path = resolve_tool_path(app, tool)?;
+    let path = resolve_launch_path(app, tool)?;
     let cfg = load_config().unwrap_or_default();
     let overrides = LaunchOverrides {
         language: cfg.language,

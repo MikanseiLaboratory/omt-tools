@@ -148,13 +148,57 @@ fn list_running_tools() -> Result<Vec<String>, String> {
     Ok(tools::running_tool_names())
 }
 
+/// macOS menu bar takes its app title from the first submenu. An empty menu
+/// (`Menu::new`) makes that title blank. Windows / Linux stay menuless.
+fn native_menu<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> tauri::Result<tauri::menu::Menu<R>> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
+        let name = app
+            .config()
+            .product_name
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "OMT Tools".to_string());
+        let about = AboutMetadata {
+            name: Some(name.clone()),
+            version: Some(app.package_info().version.to_string()),
+            copyright: app.config().bundle.copyright.clone(),
+            authors: app.config().bundle.publisher.clone().map(|p| vec![p]),
+            ..Default::default()
+        };
+        let app_menu = Submenu::with_items(
+            app,
+            &name,
+            true,
+            &[
+                &PredefinedMenuItem::about(app, None, Some(about))?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::services(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::hide(app, None)?,
+                &PredefinedMenuItem::hide_others(app, None)?,
+                &PredefinedMenuItem::show_all(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::quit(app, None)?,
+            ],
+        )?;
+        Menu::with_items(app, &[&app_menu])
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        tauri::menu::Menu::new(app)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // No native application menu — keep chrome minimal like NDI Tools.
-        .menu(tauri::menu::Menu::new)
+        .menu(native_menu)
         .setup(|app| {
             if let Some(tool_id) = os_shortcuts::parse_launch_tool_id() {
                 if let Some(window) = app.get_webview_window("main") {
