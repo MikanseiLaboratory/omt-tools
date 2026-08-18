@@ -19,7 +19,11 @@ pub use playout::{BufferSettings, BufferUnit, DelaySetting};
 pub use receive::{
     ConnectOptions, LatestVideo, MetadataLogEntry, ReceiveCounters, ReceiveWorker, VideoFrame,
 };
-pub use send::{AudioToneConfig, SendSession, SendSessionConfig, SendStats};
+pub use send::{
+    AudioToneConfig, DEFAULT_VIDEO_FRAME_BUFFER_FRAMES, MAX_VIDEO_FRAME_BUFFER_FRAMES,
+    MIN_VIDEO_FRAME_BUFFER_FRAMES, SendSession, SendSessionConfig, SendStats,
+    clamp_video_frame_buffer_frames,
+};
 pub use stall::{StallDetector, StallState};
 pub use stats::FpsCounter;
 

@@ -18,13 +18,19 @@ use crate::runtime;
 const TICKS_PER_SECOND: i64 = 10_000_000;
 /// How often [`SendStats`] are refreshed (connections, FPS window, etc.).
 const STATS_INTERVAL: Duration = Duration::from_millis(100);
-/// Prefetched UYVY frames waiting for the paced sender.
-///
-/// Depth is small on purpose: enough to hide pattern-fill latency without
-/// building a backlog that would burst onto the wire after a hitch.
-const VIDEO_FRAME_BUFFER_DEPTH: usize = 3;
+/// Default prefetched UYVY frames waiting for the paced sender.
+pub const DEFAULT_VIDEO_FRAME_BUFFER_FRAMES: u32 = 3;
+/// Minimum allowed send-side frame buffer depth.
+pub const MIN_VIDEO_FRAME_BUFFER_FRAMES: u32 = 1;
+/// Maximum allowed send-side frame buffer depth.
+pub const MAX_VIDEO_FRAME_BUFFER_FRAMES: u32 = 16;
 /// Max sleep slice while waiting for a frame deadline (keeps stop responsive).
 const PACE_SLEEP_SLICE: Duration = Duration::from_millis(5);
+
+/// Clamp a configured frame-buffer depth into the supported range.
+pub fn clamp_video_frame_buffer_frames(frames: u32) -> usize {
+    frames.clamp(MIN_VIDEO_FRAME_BUFFER_FRAMES, MAX_VIDEO_FRAME_BUFFER_FRAMES) as usize
+}
 
 /// Audio tone configuration.
 #[derive(Debug, Clone)]
@@ -70,6 +76,8 @@ pub struct SendSessionConfig {
     pub quality: Quality,
     /// Whether UYVY content changes every frame.
     pub animate: bool,
+    /// Prefetch depth for paced video sends (clamped to 1..=16).
+    pub frame_buffer_frames: u32,
     /// Audio tone settings.
     pub audio: AudioToneConfig,
 }
@@ -84,6 +92,7 @@ impl Default for SendSessionConfig {
             fps_d: 1,
             quality: Quality::Medium,
             animate: true,
+            frame_buffer_frames: DEFAULT_VIDEO_FRAME_BUFFER_FRAMES,
             audio: AudioToneConfig::default(),
         }
     }
@@ -351,6 +360,7 @@ fn sleep_until_deadline(deadline: Instant, running: &AtomicBool) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fill_video_buffer(
     buffer: &mut VecDeque<(u64, Vec<u8>)>,
     start_idx: u64,
@@ -359,8 +369,10 @@ fn fill_video_buffer(
     content_epoch: u64,
     cached: &mut Option<(u64, Vec<u8>)>,
     frame_bytes: usize,
+    depth: usize,
 ) -> bool {
-    while buffer.len() < VIDEO_FRAME_BUFFER_DEPTH {
+    let depth = depth.max(1);
+    while buffer.len() < depth {
         let idx = start_idx.saturating_add(buffer.len() as u64);
         let uyvy = if !animate {
             if let Some((cached_epoch, data)) = cached.as_ref()
@@ -401,8 +413,9 @@ fn video_loop(
 ) {
     let stride = (cfg.width as usize) * 2;
     let frame_bytes = stride * cfg.height as usize;
+    let buffer_depth = clamp_video_frame_buffer_frames(cfg.frame_buffer_frames);
     let mut cached: Option<(u64, Vec<u8>)> = None;
-    let mut buffer: VecDeque<(u64, Vec<u8>)> = VecDeque::with_capacity(VIDEO_FRAME_BUFFER_DEPTH);
+    let mut buffer: VecDeque<(u64, Vec<u8>)> = VecDeque::with_capacity(buffer_depth);
     let mut frame_idx = 0u64;
     let mut last_stats = Instant::now();
     let mut last_codec_time = 0i64;
@@ -455,6 +468,7 @@ fn video_loop(
             epoch_n,
             &mut cached,
             frame_bytes,
+            buffer_depth,
         ) {
             thread::sleep(Duration::from_millis(5));
             continue;
@@ -646,9 +660,10 @@ mod tests {
             false,
             1,
             &mut cached,
-            8
+            8,
+            DEFAULT_VIDEO_FRAME_BUFFER_FRAMES as usize,
         ));
-        assert_eq!(buffer.len(), VIDEO_FRAME_BUFFER_DEPTH);
+        assert_eq!(buffer.len(), DEFAULT_VIDEO_FRAME_BUFFER_FRAMES as usize);
         let first_calls = calls.load(Ordering::Relaxed);
         assert_eq!(first_calls, 1);
         buffer.clear();
@@ -659,8 +674,22 @@ mod tests {
             false,
             1,
             &mut cached,
-            8
+            8,
+            DEFAULT_VIDEO_FRAME_BUFFER_FRAMES as usize,
         ));
         assert_eq!(calls.load(Ordering::Relaxed), first_calls);
+    }
+
+    #[test]
+    fn clamp_frame_buffer_frames_respects_bounds() {
+        assert_eq!(clamp_video_frame_buffer_frames(0), 1);
+        assert_eq!(
+            clamp_video_frame_buffer_frames(DEFAULT_VIDEO_FRAME_BUFFER_FRAMES),
+            DEFAULT_VIDEO_FRAME_BUFFER_FRAMES as usize
+        );
+        assert_eq!(
+            clamp_video_frame_buffer_frames(MAX_VIDEO_FRAME_BUFFER_FRAMES + 10),
+            MAX_VIDEO_FRAME_BUFFER_FRAMES as usize
+        );
     }
 }

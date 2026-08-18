@@ -54,6 +54,8 @@ pub struct TestPatternsConfig {
     pub schema_version: u32,
     /// User-registered still-image paths (loaded at startup).
     pub custom_images: Vec<PathBuf>,
+    /// Prefetched video frames for paced OMT send (1..=16, default 3).
+    pub frame_buffer_frames: u32,
 }
 
 impl Default for TestPatternsConfig {
@@ -61,6 +63,7 @@ impl Default for TestPatternsConfig {
         Self {
             schema_version: 1,
             custom_images: Vec::new(),
+            frame_buffer_frames: 3,
         }
     }
 }
@@ -184,11 +187,20 @@ mod tests {
         let cfg = TestPatternsConfig {
             schema_version: 1,
             custom_images: vec![PathBuf::from("C:/images/bars.png")],
+            frame_buffer_frames: 5,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let parsed: TestPatternsConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.custom_images.len(), 1);
         assert_eq!(parsed.custom_images[0], PathBuf::from("C:/images/bars.png"));
+        assert_eq!(parsed.frame_buffer_frames, 5);
+    }
+
+    #[test]
+    fn legacy_test_patterns_json_defaults_frame_buffer() {
+        let parsed: TestPatternsConfig =
+            serde_json::from_str(r#"{"schema_version":1,"custom_images":[]}"#).unwrap();
+        assert_eq!(parsed.frame_buffer_frames, 3);
     }
 
     #[test]
