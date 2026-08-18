@@ -1,5 +1,6 @@
-//! OMT send session with Tokio-paced video + OS-thread tone audio.
+//! OMT send session with paced video + OS-thread tone audio.
 
+use std::collections::VecDeque;
 use std::f32::consts::TAU;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -17,6 +18,19 @@ use crate::runtime;
 const TICKS_PER_SECOND: i64 = 10_000_000;
 /// How often [`SendStats`] are refreshed (connections, FPS window, etc.).
 const STATS_INTERVAL: Duration = Duration::from_millis(100);
+/// Default prefetched UYVY frames waiting for the paced sender.
+pub const DEFAULT_VIDEO_FRAME_BUFFER_FRAMES: u32 = 3;
+/// Minimum allowed send-side frame buffer depth.
+pub const MIN_VIDEO_FRAME_BUFFER_FRAMES: u32 = 1;
+/// Maximum allowed send-side frame buffer depth.
+pub const MAX_VIDEO_FRAME_BUFFER_FRAMES: u32 = 16;
+/// Max sleep slice while waiting for a frame deadline (keeps stop responsive).
+const PACE_SLEEP_SLICE: Duration = Duration::from_millis(5);
+
+/// Clamp a configured frame-buffer depth into the supported range.
+pub fn clamp_video_frame_buffer_frames(frames: u32) -> usize {
+    frames.clamp(MIN_VIDEO_FRAME_BUFFER_FRAMES, MAX_VIDEO_FRAME_BUFFER_FRAMES) as usize
+}
 
 /// Audio tone configuration.
 #[derive(Debug, Clone)]
@@ -62,6 +76,8 @@ pub struct SendSessionConfig {
     pub quality: Quality,
     /// Whether UYVY content changes every frame.
     pub animate: bool,
+    /// Prefetch depth for paced video sends (clamped to 1..=16).
+    pub frame_buffer_frames: u32,
     /// Audio tone settings.
     pub audio: AudioToneConfig,
 }
@@ -76,6 +92,7 @@ impl Default for SendSessionConfig {
             fps_d: 1,
             quality: Quality::Medium,
             animate: true,
+            frame_buffer_frames: DEFAULT_VIDEO_FRAME_BUFFER_FRAMES,
             audio: AudioToneConfig::default(),
         }
     }
@@ -110,7 +127,7 @@ pub struct SendStats {
 
 type FrameProvider = Arc<dyn Fn(u64) -> Vec<u8> + Send + Sync>;
 
-/// Background OMT sender owning a Tokio video task + OS audio thread.
+/// Background OMT sender owning OS video + audio pacing threads.
 pub struct SendSession {
     running: Arc<AtomicBool>,
     stats: Arc<Mutex<SendStats>>,
@@ -118,7 +135,7 @@ pub struct SendSession {
     animate: Arc<AtomicBool>,
     content_epoch: Arc<AtomicU64>,
     audio_join: Option<thread::JoinHandle<()>>,
-    video_join: Option<tokio::task::JoinHandle<()>>,
+    video_join: Option<thread::JoinHandle<()>>,
 }
 
 impl SendSession {
@@ -179,19 +196,20 @@ impl SendSession {
         let video_animate = Arc::clone(&animate);
         let video_epoch = Arc::clone(&content_epoch);
         let video_cfg = config.clone();
-        let video_join = runtime::spawn(async move {
-            video_loop(
-                video_sender,
-                video_cfg,
-                provider,
-                video_animate,
-                video_epoch,
-                video_running,
-                video_stats,
-                epoch,
-            )
-            .await;
-        });
+        let video_join = thread::Builder::new()
+            .name("omt-send-video".into())
+            .spawn(move || {
+                video_loop(
+                    video_sender,
+                    video_cfg,
+                    provider,
+                    video_animate,
+                    video_epoch,
+                    video_running,
+                    video_stats,
+                    epoch,
+                );
+            })?;
 
         Ok(Self {
             running,
@@ -234,7 +252,7 @@ impl SendSession {
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
         if let Some(join) = self.video_join.take() {
-            join.abort();
+            let _ = join.join();
         }
         if let Some(join) = self.audio_join.take() {
             let _ = join.join();
@@ -311,8 +329,88 @@ fn audio_loop(
     }
 }
 
+/// Wall-clock duration for an OMT timestamp (100 ns ticks).
+fn duration_from_omt_ticks(ticks: i64) -> Duration {
+    let ticks = ticks.max(0) as u64;
+    Duration::from_nanos(ticks.saturating_mul(100))
+}
+
+/// How many whole frame intervals fit in `elapsed` on the OMT tick timeline.
+fn frames_elapsed(elapsed: Duration, video_interval_ticks: i64) -> u64 {
+    let interval = video_interval_ticks.max(1) as u128;
+    let ticks = elapsed.as_nanos() / 100;
+    (ticks / interval) as u64
+}
+
+/// Absolute deadline for `frame_idx` on a shared wall-clock epoch.
+fn frame_deadline(epoch: Instant, frame_idx: u64, video_interval_ticks: i64) -> Instant {
+    let ticks = (frame_idx as i64).saturating_mul(video_interval_ticks.max(1));
+    epoch + duration_from_omt_ticks(ticks)
+}
+
+/// Sleep until `deadline` (or until `running` clears), in short slices.
+fn sleep_until_deadline(deadline: Instant, running: &AtomicBool) {
+    while running.load(Ordering::Relaxed) {
+        let now = Instant::now();
+        if now >= deadline {
+            return;
+        }
+        let slice = (deadline - now).min(PACE_SLEEP_SLICE);
+        thread::sleep(slice);
+    }
+}
+
+/// Relabel prefetched frames so the front matches `new_start`.
+///
+/// Used when skipping late slots: throw away timeline indices, keep pixels.
+fn rebase_buffer_indices(buffer: &mut VecDeque<(u64, Vec<u8>)>, new_start: u64) {
+    for (offset, (idx, _)) in buffer.iter_mut().enumerate() {
+        *idx = new_start.saturating_add(offset as u64);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-async fn video_loop(
+fn fill_video_buffer(
+    buffer: &mut VecDeque<(u64, Vec<u8>)>,
+    start_idx: u64,
+    provider: &FrameProvider,
+    animate: bool,
+    content_epoch: u64,
+    cached: &mut Option<(u64, Vec<u8>)>,
+    frame_bytes: usize,
+    depth: usize,
+) -> bool {
+    let depth = depth.max(1);
+    while buffer.len() < depth {
+        let idx = start_idx.saturating_add(buffer.len() as u64);
+        let uyvy = if !animate {
+            if let Some((cached_epoch, data)) = cached.as_ref()
+                && *cached_epoch == content_epoch
+            {
+                data.clone()
+            } else {
+                let frame = provider(idx);
+                if frame.len() != frame_bytes {
+                    return false;
+                }
+                *cached = Some((content_epoch, frame.clone()));
+                frame
+            }
+        } else {
+            *cached = None;
+            let frame = provider(idx);
+            if frame.len() != frame_bytes {
+                return false;
+            }
+            frame
+        };
+        buffer.push_back((idx, uyvy));
+    }
+    true
+}
+
+#[allow(clippy::too_many_arguments, unused_assignments)]
+fn video_loop(
     sender: Arc<Mutex<Sender>>,
     cfg: SendSessionConfig,
     provider: FrameProvider,
@@ -324,60 +422,97 @@ async fn video_loop(
 ) {
     let stride = (cfg.width as usize) * 2;
     let frame_bytes = stride * cfg.height as usize;
+    let buffer_depth = clamp_video_frame_buffer_frames(cfg.frame_buffer_frames);
     let mut cached: Option<(u64, Vec<u8>)> = None;
+    let mut buffer: VecDeque<(u64, Vec<u8>)> = VecDeque::with_capacity(buffer_depth);
     let mut frame_idx = 0u64;
     let mut last_stats = Instant::now();
     let mut last_codec_time = 0i64;
     let mut last_frames = 0i64;
+    let mut behind = false;
+    let mut was_subscribed = false;
+    let mut last_content_epoch = content_epoch.load(Ordering::Relaxed);
     let video_interval =
         (cfg.fps_d as i64).saturating_mul(TICKS_PER_SECOND) / cfg.fps_n.max(1) as i64;
     let target_fps = cfg.fps_n as f64 / cfg.fps_d.max(1) as f64;
+    // Half a frame late still counts as the same slot; beyond that we skip ahead.
+    let late_slack = duration_from_omt_ticks(video_interval.max(1) / 2);
 
     while running.load(Ordering::Relaxed) {
-        let video_ok = tokio::task::block_in_place(|| {
+        let video_ok = {
             let mut s = sender.lock();
             let _ = s.poll_accept();
             let _ = s.poll_peer_metadata();
             s.video_subscribed()
-        });
+        };
         if !video_ok {
-            tokio::time::sleep(Duration::from_millis(5)).await;
+            if was_subscribed {
+                buffer.clear();
+                was_subscribed = false;
+            }
+            thread::sleep(Duration::from_millis(5));
             continue;
         }
+        if !was_subscribed {
+            // Align to wall clock so we never dump a backlog after idle.
+            frame_idx = frames_elapsed(epoch.elapsed(), video_interval);
+            buffer.clear();
+            was_subscribed = true;
+            behind = false;
+        }
 
-        let target = Duration::from_secs_f64(frame_idx as f64 / target_fps);
-        let now = epoch.elapsed();
-        let behind = now > target + Duration::from_secs_f64(2.0 / target_fps);
-        if target > now {
-            tokio::time::sleep(target - now).await;
-        } else if behind {
-            frame_idx = (now.as_secs_f64() * target_fps).floor() as u64;
+        let epoch_n = content_epoch.load(Ordering::Relaxed);
+        if epoch_n != last_content_epoch {
+            cached = None;
+            buffer.clear();
+            last_content_epoch = epoch_n;
         }
 
         let animate = animate_flag.load(Ordering::Relaxed);
-        let epoch_n = content_epoch.load(Ordering::Relaxed);
-        let uyvy = if !animate {
-            if let Some((cached_epoch, data)) = cached.as_ref()
-                && *cached_epoch == epoch_n
-            {
-                data.clone()
-            } else {
-                let frame = provider(frame_idx);
-                if frame.len() != frame_bytes {
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                    continue;
-                }
-                cached = Some((epoch_n, frame.clone()));
-                frame
+        // Generate at most one frame before the deadline check so a slow fill
+        // cannot skip-loop forever (clearing the buffer each time it overruns
+        // one slot). Remaining depth is prefetched after send.
+        let warmup = if buffer.is_empty() { 1 } else { buffer.len() };
+        if !fill_video_buffer(
+            &mut buffer,
+            frame_idx,
+            &provider,
+            animate,
+            epoch_n,
+            &mut cached,
+            frame_bytes,
+            warmup,
+        ) {
+            thread::sleep(Duration::from_millis(5));
+            continue;
+        }
+
+        // Absolute deadline pacing: sleep when early; when late, skip whole
+        // slots instead of bursting catch-up sends (Issue #27). Ready pixels
+        // are kept and retimed so the receiver still gets a frame.
+        let deadline = frame_deadline(epoch, frame_idx, video_interval);
+        let now = Instant::now();
+        if now < deadline {
+            sleep_until_deadline(deadline, running.as_ref());
+            if !running.load(Ordering::Relaxed) {
+                break;
             }
+            behind = false;
         } else {
-            cached = None;
-            let frame = provider(frame_idx);
-            if frame.len() != frame_bytes {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-                continue;
+            let late_by = now.saturating_duration_since(deadline);
+            let ideal = frames_elapsed(epoch.elapsed(), video_interval);
+            if ideal > frame_idx {
+                rebase_buffer_indices(&mut buffer, ideal);
+                frame_idx = ideal;
+                behind = true;
+            } else {
+                behind = late_by > late_slack;
             }
-            frame
+        }
+
+        let Some((_idx, uyvy)) = buffer.pop_front() else {
+            behind = true;
+            continue;
         };
 
         let timestamp = (frame_idx as i64).saturating_mul(video_interval);
@@ -395,21 +530,30 @@ async fn video_loop(
             data: uyvy,
             ..Default::default()
         };
-        let _ = tokio::task::block_in_place(|| sender.lock().send_video(frame));
-        frame_idx += 1;
+        let _ = sender.lock().send_video(frame);
+        frame_idx = frame_idx.saturating_add(1);
+        let _ = fill_video_buffer(
+            &mut buffer,
+            frame_idx,
+            &provider,
+            animate,
+            epoch_n,
+            &mut cached,
+            frame_bytes,
+            buffer_depth,
+        );
 
         if last_stats.elapsed() >= STATS_INTERVAL {
-            let (st, port, connections, video_subs, audio_subs) =
-                tokio::task::block_in_place(|| {
-                    let s = sender.lock();
-                    (
-                        s.statistics(),
-                        s.port(),
-                        s.connection_count() as u32,
-                        s.video_subscriber_count() as u32,
-                        s.audio_subscriber_count() as u32,
-                    )
-                });
+            let (st, port, connections, video_subs, audio_subs) = {
+                let s = sender.lock();
+                (
+                    s.statistics(),
+                    s.port(),
+                    s.connection_count() as u32,
+                    s.video_subscriber_count() as u32,
+                    s.audio_subscriber_count() as u32,
+                )
+            };
             let window = last_stats.elapsed().as_secs_f64().max(0.001);
             let df = (st.frames - last_frames).max(0);
             let dt = (st.codec_time - last_codec_time).max(0);
@@ -434,8 +578,6 @@ async fn video_loop(
             last_frames = st.frames;
             last_stats = Instant::now();
         }
-
-        tokio::task::yield_now().await;
     }
 }
 
@@ -470,5 +612,117 @@ fn append_sine_planar(
     *phase = start + n as f64;
     if *phase >= rate {
         *phase %= rate;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn interval(fps_n: i32, fps_d: i32) -> i64 {
+        (fps_d as i64).saturating_mul(TICKS_PER_SECOND) / fps_n.max(1) as i64
+    }
+
+    #[test]
+    fn omt_tick_interval_matches_common_rates() {
+        assert_eq!(interval(30, 1), 333_333);
+        assert_eq!(interval(60, 1), 166_666);
+        assert_eq!(interval(30_000, 1_001), 333_666);
+        assert_eq!(interval(60_000, 1_001), 166_833);
+    }
+
+    #[test]
+    fn frames_elapsed_tracks_omt_tick_timeline() {
+        let iv = interval(30, 1);
+        let period = duration_from_omt_ticks(iv);
+        assert_eq!(frames_elapsed(Duration::ZERO, iv), 0);
+        assert_eq!(frames_elapsed(period, iv), 1);
+        assert_eq!(frames_elapsed(period.saturating_mul(10), iv), 10);
+        // Just shy of the next boundary stays on the previous index.
+        assert_eq!(
+            frames_elapsed(period.saturating_mul(10) - Duration::from_nanos(100), iv),
+            9
+        );
+    }
+
+    #[test]
+    fn frame_deadline_is_monotonic_and_aligned() {
+        let epoch = Instant::now();
+        let iv = interval(30, 1);
+        let d0 = frame_deadline(epoch, 0, iv);
+        let d1 = frame_deadline(epoch, 1, iv);
+        let d2 = frame_deadline(epoch, 2, iv);
+        assert_eq!(d0, epoch);
+        assert_eq!(d1.duration_since(d0), duration_from_omt_ticks(iv));
+        assert_eq!(
+            d2.duration_since(d0),
+            duration_from_omt_ticks(iv.saturating_mul(2))
+        );
+        // Deadline and frames_elapsed agree at the boundary.
+        assert_eq!(frames_elapsed(d1.duration_since(epoch), iv), 1);
+    }
+
+    #[test]
+    fn fill_video_buffer_prefers_still_cache() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let calls_c = Arc::clone(&calls);
+        let provider: FrameProvider = Arc::new(move |_idx| {
+            calls_c.fetch_add(1, Ordering::Relaxed);
+            vec![0u8; 8]
+        });
+        let mut cached = None;
+        let mut buffer = VecDeque::new();
+        assert!(fill_video_buffer(
+            &mut buffer,
+            0,
+            &provider,
+            false,
+            1,
+            &mut cached,
+            8,
+            DEFAULT_VIDEO_FRAME_BUFFER_FRAMES as usize,
+        ));
+        assert_eq!(buffer.len(), DEFAULT_VIDEO_FRAME_BUFFER_FRAMES as usize);
+        let first_calls = calls.load(Ordering::Relaxed);
+        assert_eq!(first_calls, 1);
+        buffer.clear();
+        assert!(fill_video_buffer(
+            &mut buffer,
+            3,
+            &provider,
+            false,
+            1,
+            &mut cached,
+            8,
+            DEFAULT_VIDEO_FRAME_BUFFER_FRAMES as usize,
+        ));
+        assert_eq!(calls.load(Ordering::Relaxed), first_calls);
+    }
+
+    #[test]
+    fn clamp_frame_buffer_frames_respects_bounds() {
+        assert_eq!(clamp_video_frame_buffer_frames(0), 1);
+        assert_eq!(
+            clamp_video_frame_buffer_frames(DEFAULT_VIDEO_FRAME_BUFFER_FRAMES),
+            DEFAULT_VIDEO_FRAME_BUFFER_FRAMES as usize
+        );
+        assert_eq!(
+            clamp_video_frame_buffer_frames(MAX_VIDEO_FRAME_BUFFER_FRAMES + 10),
+            MAX_VIDEO_FRAME_BUFFER_FRAMES as usize
+        );
+    }
+
+    #[test]
+    fn rebase_buffer_indices_keeps_pixels_and_retimes() {
+        let mut buffer =
+            VecDeque::from([(10u64, vec![1u8, 2]), (11, vec![3, 4]), (12, vec![5, 6])]);
+        rebase_buffer_indices(&mut buffer, 40);
+        assert_eq!(buffer[0].0, 40);
+        assert_eq!(buffer[1].0, 41);
+        assert_eq!(buffer[2].0, 42);
+        assert_eq!(buffer[0].1, vec![1, 2]);
+        let (idx, pixels) = buffer.pop_front().expect("ready frame");
+        assert_eq!(idx, 40);
+        assert_eq!(pixels, vec![1, 2]);
     }
 }

@@ -14,7 +14,10 @@ use gpui::{
     prelude::*, px, rgb, size,
 };
 use image::{Frame, ImageBuffer, Rgba};
-use omt_media::{AudioToneConfig, SendSession, SendSessionConfig, SendStats};
+use omt_media::{
+    AudioToneConfig, MAX_VIDEO_FRAME_BUFFER_FRAMES, MIN_VIDEO_FRAME_BUFFER_FRAMES, SendSession,
+    SendSessionConfig, SendStats, clamp_video_frame_buffer_frames,
+};
 use openmediatransport::{Quality, uyvy_to_rgba};
 use pattern_generator::{PatternKind, fill_uyvy, uyvy_from_image_path};
 use smallvec::smallvec;
@@ -289,10 +292,11 @@ fn image_display_name(path: &Path) -> SharedString {
     )
 }
 
-fn persist_custom_images(paths: &[PathBuf]) {
+fn persist_test_patterns_prefs(paths: &[PathBuf], frame_buffer_frames: u32) {
     let cfg = TestPatternsConfig {
         schema_version: 1,
         custom_images: paths.to_vec(),
+        frame_buffer_frames: clamp_video_frame_buffer_frames(frame_buffer_frames) as u32,
     };
     let _ = save_test_patterns_config(&cfg);
 }
@@ -335,6 +339,8 @@ struct PatternsView {
     sample_rate: i32,
     channels: i32,
     samples: i32,
+    /// Prefetch depth for paced video sends (persisted).
+    frame_buffer_frames: u32,
     custom_images: Vec<CustomImage>,
     selected_custom: Option<usize>,
     session: Option<SendSession>,
@@ -363,9 +369,10 @@ impl PatternsView {
             .map(|kind| (kind, pattern_thumb(kind)))
             .collect();
 
-        let saved = load_test_patterns_config()
-            .unwrap_or_default()
-            .custom_images;
+        let saved_cfg = load_test_patterns_config().unwrap_or_default();
+        let frame_buffer_frames =
+            clamp_video_frame_buffer_frames(saved_cfg.frame_buffer_frames) as u32;
+        let saved = saved_cfg.custom_images;
         let saved_count = saved.len();
         let mut custom_images = Vec::new();
         let mut kept_paths = Vec::new();
@@ -378,7 +385,7 @@ impl PatternsView {
             custom_images.push(CustomImage { path, thumb });
         }
         if kept_paths.len() != saved_count {
-            persist_custom_images(&kept_paths);
+            persist_test_patterns_prefs(&kept_paths, frame_buffer_frames);
         }
 
         let mut view = Self {
@@ -400,6 +407,7 @@ impl PatternsView {
             sample_rate: 48_000,
             channels: 2,
             samples: 480,
+            frame_buffer_frames,
             custom_images,
             selected_custom: None,
             session: None,
@@ -638,7 +646,22 @@ impl PatternsView {
             .iter()
             .map(|img| img.path.clone())
             .collect();
-        persist_custom_images(&paths);
+        persist_test_patterns_prefs(&paths, self.frame_buffer_frames);
+    }
+
+    fn nudge_frame_buffer(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let next = (self.frame_buffer_frames as i32 + delta).clamp(
+            MIN_VIDEO_FRAME_BUFFER_FRAMES as i32,
+            MAX_VIDEO_FRAME_BUFFER_FRAMES as i32,
+        ) as u32;
+        if next == self.frame_buffer_frames {
+            cx.notify();
+            return;
+        }
+        self.frame_buffer_frames = next;
+        self.persist_images();
+        self.apply_settings();
+        cx.notify();
     }
 
     fn open_custom_menu(&mut self, index: usize, x: f32, y: f32, cx: &mut Context<Self>) {
@@ -919,6 +942,7 @@ impl PatternsView {
             fps_d: self.frame_rate.d,
             quality: self.quality,
             animate: self.animate && self.kind != PatternKind::Image,
+            frame_buffer_frames: self.frame_buffer_frames,
             audio: AudioToneConfig {
                 sample_rate: self.sample_rate,
                 channels: self.channels,
@@ -1004,6 +1028,7 @@ impl Render for PatternsView {
         let animate = self.animate;
         let speed_h = self.anim_speed_h_pct;
         let speed_v = self.anim_speed_v_pct;
+        let frame_buffer_frames = self.frame_buffer_frames;
         let level_dbfs = self.level_dbfs;
 
         let mut root =
@@ -1186,6 +1211,7 @@ impl Render for PatternsView {
                             frame_rate,
                             open_menu == Some(MenuKind::Fps),
                         ))
+                        .child(frame_buffer_control(cx, language, frame_buffer_frames))
                         .child(quality_control(cx, language, quality))
                         .child(level_control(
                             cx,
@@ -1255,8 +1281,8 @@ fn overlay_layer(
             MenuKind::Resolution => (px(16.0), px(168.0)),
             MenuKind::Tone => (px(148.0), px(160.0)),
             MenuKind::Fps => (px(304.0), px(100.0)),
-            // After quality segmented control (~130px).
-            MenuKind::Level => (px(538.0), px(120.0)),
+            // After FPS, frame-buffer stepper (~90px), and quality segmented control (~130px).
+            MenuKind::Level => (px(644.0), px(120.0)),
         };
         let menu_div = div()
             .absolute()
@@ -1969,6 +1995,44 @@ where
         .on_click(cx.listener(move |this, _, _, cx| {
             handler(this, cx);
         }))
+}
+
+fn frame_buffer_control(
+    cx: &mut Context<PatternsView>,
+    language: Language,
+    frames: u32,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .text_xs()
+                .opacity(0.65)
+                .child(t(language, "patterns.frame_buffer")),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .h(px(24.0))
+                .child(step_btn(cx, "frame-buffer-dec", "−", |this, cx| {
+                    this.nudge_frame_buffer(-1, cx);
+                }))
+                .child(
+                    div()
+                        .w(px(24.0))
+                        .text_xs()
+                        .text_center()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(format!("{frames}")),
+                )
+                .child(step_btn(cx, "frame-buffer-inc", "+", |this, cx| {
+                    this.nudge_frame_buffer(1, cx);
+                })),
+        )
 }
 
 fn fps_control(
