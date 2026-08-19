@@ -530,6 +530,11 @@ async fn apply_connect(
     playout: &mut Playout,
 ) {
     *latest.error.lock() = None;
+    // Tear down the previous session before clearing UI state so decode threads
+    // cannot publish leftover frames into the new selection.
+    if let Some(old) = receiver.take() {
+        old.disconnect();
+    }
     // Close the prep identity gate and drop leftover pixels from the previous
     // source before opening the new session. Setting `url` only after connect
     // succeeds prevents republishing the old source under the new selection.
@@ -543,9 +548,6 @@ async fn apply_connect(
     playout.reset();
     publish_buffer_delays(latest, playout);
     stall.lock().reset();
-    if let Some(old) = receiver.take() {
-        old.disconnect();
-    }
     *latest.session_state.lock() = SessionState::Connecting;
     let url = opts.url.clone();
     match open_receiver(opts).await {
