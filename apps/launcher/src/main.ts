@@ -61,10 +61,6 @@ const TOOL_VISUALS: Record<string, ToolVisual> = {
     accent: "#ff4fa3",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4z"/><path d="M8 5v14M12 5v14M16 5v14M4 9h16M4 13h16"/></svg>`,
   },
-  "screen-capture": {
-    accent: "#f0c14a",
-    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="12" cy="11" r="3"/><path d="M8 21h8"/></svg>`,
-  },
   "config-manager": {
     accent: "#5ad1a4",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>`,

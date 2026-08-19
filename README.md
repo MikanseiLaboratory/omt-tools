@@ -1,6 +1,7 @@
 # OMT Tools
 
 [![CI](https://github.com/MikanseiLaboratory/omt-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/MikanseiLaboratory/omt-tools/actions/workflows/ci.yml)
+[Latest release](https://github.com/MikanseiLaboratory/omt-tools/releases/latest)
 
 Open Media Transport production utilities inspired by NDI Tools.
 
@@ -15,7 +16,8 @@ Open Media Transport production utilities inspired by NDI Tools.
 | Test Patterns | Send SMPTE-style patterns + tone over OMT |
 | Config Manager | View and edit the global OMT `settings.xml` |
 | Discovery Server | GUI + CLI TCP discovery server (port 6399) |
-| Screen Capture | Windows Graphics Capture / ScreenCaptureKit (WIP) |
+
+Official vMix OMT tools for Windows (Desktop Capture, Viewer, Matrix Router, Settings Manager): [vMix Desktop Capture](https://www.vmix.com/software/vmix-desktop-capture.aspx)
 
 Runtime media stack: [`MikanseiLaboratory/openmediatransport-rs`](https://github.com/MikanseiLaboratory/openmediatransport-rs) + [`MikanseiLaboratory/vmx-rs`](https://github.com/MikanseiLaboratory/vmx-rs)
 (VMX SIMD path reporting via `simd_path()`: `avx2` / `sse128` / `neon` / `scalar`).

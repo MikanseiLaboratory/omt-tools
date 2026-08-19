@@ -13,8 +13,6 @@ pub enum ToolId {
     StudioMonitor,
     /// Test Patterns sender.
     TestPatterns,
-    /// Screen Capture sender (optional / preview).
-    ScreenCapture,
     /// Global `settings.xml` editor.
     ConfigManager,
     /// Discovery Server GUI.
@@ -27,7 +25,6 @@ impl ToolId {
         match self {
             Self::StudioMonitor => "omt-studio-monitor",
             Self::TestPatterns => "omt-test-patterns",
-            Self::ScreenCapture => "omt-screen-capture",
             Self::ConfigManager => "omt-config-manager",
             Self::DiscoveryServer => "omt-discovery-server-gui",
         }
@@ -38,7 +35,6 @@ impl ToolId {
         match self {
             Self::StudioMonitor => "tool.studio_monitor",
             Self::TestPatterns => "tool.test_patterns",
-            Self::ScreenCapture => "tool.screen_capture",
             Self::ConfigManager => "tool.config_manager",
             Self::DiscoveryServer => "tool.discovery_server",
         }
@@ -49,7 +45,6 @@ impl ToolId {
         match self {
             Self::StudioMonitor => "tool.studio_monitor.desc",
             Self::TestPatterns => "tool.test_patterns.desc",
-            Self::ScreenCapture => "tool.screen_capture.desc",
             Self::ConfigManager => "tool.config_manager.desc",
             Self::DiscoveryServer => "tool.discovery_server.desc",
         }
@@ -62,7 +57,6 @@ impl ToolId {
             Self::TestPatterns,
             Self::ConfigManager,
             Self::DiscoveryServer,
-            Self::ScreenCapture,
         ]
     }
 
@@ -71,7 +65,6 @@ impl ToolId {
         match self {
             Self::StudioMonitor => "Studio Monitor",
             Self::TestPatterns => "Test Patterns",
-            Self::ScreenCapture => "Screen Capture",
             Self::ConfigManager => "Config Manager",
             Self::DiscoveryServer => "Discovery Server",
         }
@@ -82,7 +75,6 @@ impl ToolId {
         match self {
             Self::StudioMonitor => "OMT Studio Monitor",
             Self::TestPatterns => "OMT Test Patterns",
-            Self::ScreenCapture => "OMT Screen Capture",
             Self::ConfigManager => "OMT Config Manager",
             Self::DiscoveryServer => "OMT Discovery Server",
         }
@@ -93,7 +85,6 @@ impl ToolId {
         match self {
             Self::StudioMonitor => "studio-monitor",
             Self::TestPatterns => "test-patterns",
-            Self::ScreenCapture => "screen-capture",
             Self::ConfigManager => "config-manager",
             Self::DiscoveryServer => "discovery-server",
         }
@@ -153,12 +144,6 @@ pub fn suite_manifest() -> SuiteManifest {
                 version: SUITE_VERSION.to_string(),
                 binary: ToolId::DiscoveryServer.binary_name().to_string(),
                 enabled: true,
-            },
-            ToolInfo {
-                id: ToolId::ScreenCapture,
-                version: SUITE_VERSION.to_string(),
-                binary: ToolId::ScreenCapture.binary_name().to_string(),
-                enabled: false,
             },
         ],
     }
