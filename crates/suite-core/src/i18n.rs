@@ -103,14 +103,6 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::Japanese, "tool.test_patterns.desc") => {
             "パターンを選んで映像とトーンをOMTで送出"
         }
-        (Language::English, "tool.screen_capture") => "Screen Capture",
-        (Language::Japanese, "tool.screen_capture") => "Screen Capture",
-        (Language::English, "tool.screen_capture.desc") => {
-            "Capture the desktop and send over OMT (preview)"
-        }
-        (Language::Japanese, "tool.screen_capture.desc") => {
-            "デスクトップをキャプチャしてOMT送出（プレビュー）"
-        }
         (Language::English, "tool.config_manager") => "Config Manager",
         (Language::Japanese, "tool.config_manager") => "Config Manager",
         (Language::English, "tool.config_manager.desc") => {

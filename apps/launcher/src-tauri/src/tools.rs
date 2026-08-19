@@ -18,7 +18,6 @@ pub fn parse_tool_id(tool_id: &str) -> Result<ToolId, String> {
         "test-patterns" => Ok(ToolId::TestPatterns),
         "config-manager" => Ok(ToolId::ConfigManager),
         "discovery-server" => Ok(ToolId::DiscoveryServer),
-        "screen-capture" => Ok(ToolId::ScreenCapture),
         _ => Err(format!("unknown tool: {tool_id}")),
     }
 }
@@ -101,9 +100,6 @@ fn resolve_launch_path(app: &AppHandle, tool: ToolId) -> Result<PathBuf, String>
 
 /// Launch a tool with current suite language/theme overrides.
 pub fn launch_tool(app: &AppHandle, tool: ToolId) -> Result<(), String> {
-    if tool == ToolId::ScreenCapture {
-        return Err("Screen Capture is not enabled in this suite build".into());
-    }
     let path = resolve_launch_path(app, tool)?;
     let cfg = load_config().unwrap_or_default();
     let overrides = LaunchOverrides {

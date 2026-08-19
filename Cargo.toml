@@ -5,7 +5,6 @@ members = [
     "crates/omt-media",
     "crates/pattern-generator",
     "crates/monitor-bench",
-    "crates/capture-spike",
     "apps/studio-monitor",
     "apps/test-patterns",
     "apps/config-manager",
