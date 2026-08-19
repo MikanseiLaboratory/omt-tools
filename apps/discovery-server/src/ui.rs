@@ -350,12 +350,7 @@ fn nic_chips(
     for (i, choice) in nics.iter().cloned().enumerate() {
         chips.push(nic_chip(cx, lang, i, choice, &selected, running).into_any_element());
     }
-    div()
-        .flex()
-        .flex_row()
-        .flex_wrap()
-        .gap_2()
-        .children(chips)
+    div().flex().flex_row().flex_wrap().gap_2().children(chips)
 }
 
 fn nic_chip(
