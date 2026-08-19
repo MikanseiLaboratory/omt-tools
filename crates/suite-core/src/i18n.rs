@@ -140,7 +140,9 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::English, "update.none") => "You're up to date.",
         (Language::Japanese, "update.none") => "最新です。",
         (Language::English, "update.installing") => "Downloading and installing update…",
-        (Language::Japanese, "update.installing") => "更新をダウンロードしてインストールしています…",
+        (Language::Japanese, "update.installing") => {
+            "更新をダウンロードしてインストールしています…"
+        }
         (Language::English, "update.failed") => "Could not check for updates.",
         (Language::Japanese, "update.failed") => "更新の確認に失敗しました。",
 
