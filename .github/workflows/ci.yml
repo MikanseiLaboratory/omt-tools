@@ -44,6 +44,7 @@ jobs:
             libasound2-dev \
             libudev-dev \
             libxkbcommon-dev \
+            libxkbcommon-x11-dev \
             libwayland-dev \
             libxcb-render0-dev \
             libxcb-shape0-dev \
