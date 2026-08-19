@@ -54,6 +54,15 @@ struct Labels {
     theme_system: String,
     unavailable: String,
     simd: String,
+    update_check: String,
+    update_checking: String,
+    update_available_title: String,
+    update_available_body: String,
+    update_install: String,
+    update_later: String,
+    update_none: String,
+    update_installing: String,
+    update_failed: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +90,15 @@ fn labels(lang: Language) -> Labels {
         theme_system: t(lang, "theme.system").to_string(),
         unavailable: t(lang, "tool.unavailable").to_string(),
         simd: t(lang, "simd").to_string(),
+        update_check: t(lang, "update.check").to_string(),
+        update_checking: t(lang, "update.checking").to_string(),
+        update_available_title: t(lang, "update.available.title").to_string(),
+        update_available_body: t(lang, "update.available.body").to_string(),
+        update_install: t(lang, "update.install").to_string(),
+        update_later: t(lang, "update.later").to_string(),
+        update_none: t(lang, "update.none").to_string(),
+        update_installing: t(lang, "update.installing").to_string(),
+        update_failed: t(lang, "update.failed").to_string(),
     }
 }
 
@@ -193,6 +211,7 @@ fn native_menu<R: tauri::Runtime>(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .menu(native_menu)
         .setup(|app| {

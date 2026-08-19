@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 
 const DOCS_URL = "https://github.com/MikanseiLaboratory/omt-tools#readme";
 
@@ -31,6 +33,15 @@ type Labels = {
   themeSystem: string;
   unavailable: string;
   simd: string;
+  updateCheck: string;
+  updateChecking: string;
+  updateAvailableTitle: string;
+  updateAvailableBody: string;
+  updateInstall: string;
+  updateLater: string;
+  updateNone: string;
+  updateInstalling: string;
+  updateFailed: string;
 };
 
 type LauncherState = {
@@ -73,6 +84,10 @@ const TOOL_VISUALS: Record<string, ToolVisual> = {
 
 let state: LauncherState | null = null;
 let settingsOpen = false;
+let updateDialogOpen = false;
+let checkingUpdate = false;
+let installingUpdate = false;
+let pendingUpdate: Update | null = null;
 /** toolId -> clearTimeout handle while launch feedback is visible */
 const launchingTimers = new Map<string, number>();
 /** Keep tile feedback after spawn() returns — window paint usually lags. */
@@ -104,6 +119,10 @@ function renderLabels(labels: Labels) {
   $("footer-version-label").textContent = labels.version;
   $("simd-label").textContent = labels.simd;
   $("save-settings").textContent = labels.save;
+  $("check-update").textContent = labels.updateCheck;
+  $("update-title").textContent = labels.updateAvailableTitle;
+  $("update-later").textContent = labels.updateLater;
+  $("update-confirm").textContent = labels.updateInstall;
 
   const themeSelect = $("theme-select") as HTMLSelectElement;
   themeSelect.options[0].text = labels.themeSystem;
@@ -221,6 +240,89 @@ function setSettingsOpen(open: boolean) {
   $("settings-btn").setAttribute("aria-expanded", open ? "true" : "false");
 }
 
+function formatLabel(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? "");
+}
+
+function setUpdateDialogOpen(open: boolean) {
+  updateDialogOpen = open;
+  $("update-dialog").classList.toggle("hidden", !open);
+  $("update-backdrop").classList.toggle("hidden", !open);
+  if (!open && !installingUpdate) {
+    pendingUpdate = null;
+  }
+}
+
+function showUpdateDialog(update: Update) {
+  if (!state) return;
+  pendingUpdate = update;
+  const confirmBtn = $("update-confirm") as HTMLButtonElement;
+  const laterBtn = $("update-later") as HTMLButtonElement;
+  confirmBtn.disabled = false;
+  laterBtn.disabled = false;
+  $("update-title").textContent = state.labels.updateAvailableTitle;
+  $("update-body").textContent = formatLabel(state.labels.updateAvailableBody, {
+    version: update.version,
+  });
+  const notes = (update.body ?? "").trim();
+  const notesEl = $("update-notes");
+  notesEl.textContent = notes;
+  notesEl.classList.toggle("hidden", !notes);
+  setSettingsOpen(false);
+  setUpdateDialogOpen(true);
+}
+
+async function checkForUpdate(origin: "auto" | "manual") {
+  if (!state || checkingUpdate || installingUpdate || updateDialogOpen) return;
+  checkingUpdate = true;
+  const statusEl = $("update-status");
+  const checkBtn = $("check-update") as HTMLButtonElement;
+  if (origin === "manual") {
+    statusEl.textContent = state.labels.updateChecking;
+    checkBtn.disabled = true;
+  }
+  try {
+    const update = await check();
+    if (!update) {
+      if (origin === "manual") {
+        statusEl.textContent = state.labels.updateNone;
+      }
+      return;
+    }
+    if (origin === "manual") {
+      statusEl.textContent = "";
+    }
+    showUpdateDialog(update);
+  } catch (err) {
+    if (origin === "manual") {
+      statusEl.textContent = `${state.labels.updateFailed} ${String(err)}`;
+    }
+  } finally {
+    checkingUpdate = false;
+    checkBtn.disabled = false;
+  }
+}
+
+async function installPendingUpdate() {
+  if (!pendingUpdate || !state || installingUpdate) return;
+  installingUpdate = true;
+  const confirmBtn = $("update-confirm") as HTMLButtonElement;
+  const laterBtn = $("update-later") as HTMLButtonElement;
+  confirmBtn.disabled = true;
+  laterBtn.disabled = true;
+  $("update-body").textContent = state.labels.updateInstalling;
+  try {
+    await pendingUpdate.downloadAndInstall();
+    await relaunch();
+  } catch (err) {
+    installingUpdate = false;
+    confirmBtn.disabled = false;
+    laterBtn.disabled = false;
+    setUpdateDialogOpen(false);
+    showToast(String(err));
+  }
+}
+
 async function refresh() {
   state = await invoke<LauncherState>("get_launcher_state");
   applyTheme(state.theme);
@@ -244,8 +346,12 @@ function installBeepWorkaround() {
         target instanceof HTMLSelectElement ||
         (target instanceof HTMLElement && target.isContentEditable);
       if (!isEditable) {
-        if (event.key === "Escape" && settingsOpen) {
-          setSettingsOpen(false);
+        if (event.key === "Escape") {
+          if (updateDialogOpen && !installingUpdate) {
+            setUpdateDialogOpen(false);
+          } else if (settingsOpen) {
+            setSettingsOpen(false);
+          }
         }
         // Keep Tab for focus movement; suppress WebView beep for other keys.
         if (event.key !== "Tab") {
@@ -280,6 +386,22 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   $("settings-btn").addEventListener("click", () => setSettingsOpen(!settingsOpen));
   $("settings-backdrop").addEventListener("click", () => setSettingsOpen(false));
+  $("check-update").addEventListener("click", () => {
+    void checkForUpdate("manual");
+  });
+  $("update-later").addEventListener("click", () => {
+    if (!installingUpdate) {
+      setUpdateDialogOpen(false);
+    }
+  });
+  $("update-backdrop").addEventListener("click", () => {
+    if (!installingUpdate) {
+      setUpdateDialogOpen(false);
+    }
+  });
+  $("update-confirm").addEventListener("click", () => {
+    void installPendingUpdate();
+  });
   $("docs-btn").addEventListener("click", async () => {
     try {
       await openUrl(DOCS_URL);
@@ -309,6 +431,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   try {
     await refresh();
     await syncOsTheme();
+    void checkForUpdate("auto");
   } catch (err) {
     showToast(String(err));
   }

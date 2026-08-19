@@ -1,11 +1,12 @@
 # OMT Tools
 
 [![CI](https://github.com/MikanseiLaboratory/omt-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/MikanseiLaboratory/omt-tools/actions/workflows/ci.yml)
-[Latest release](https://github.com/MikanseiLaboratory/omt-tools/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/MikanseiLaboratory/omt-tools?label=Latest%20release)](https://github.com/MikanseiLaboratory/omt-tools/releases/latest)
 
 Open Media Transport production utilities inspired by NDI Tools.
 
-<img width="864" height="571" alt="image" src="https://github.com/user-attachments/assets/80605b83-effc-4733-b96a-80b34c46e3ce" />
+<img width="907" height="703" alt="image" src="https://github.com/user-attachments/assets/e3900c36-cf5b-47fe-8dc0-174d53682840" />
+
 
 
 ## Suite contents
