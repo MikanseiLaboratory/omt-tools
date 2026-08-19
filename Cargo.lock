@@ -6217,7 +6217,7 @@ dependencies = [
 [[package]]
 name = "openmediatransport"
 version = "0.1.0"
-source = "git+https://github.com/MikanseiLaboratory/openmediatransport-rs?rev=221f3e2f200f754dbfbe63997c75e2e90d3bc47d#221f3e2f200f754dbfbe63997c75e2e90d3bc47d"
+source = "git+https://github.com/MikanseiLaboratory/openmediatransport-rs?rev=2a0a9d3113e44d7bc3fb72468f05d9e8215b4b6f#2a0a9d3113e44d7bc3fb72468f05d9e8215b4b6f"
 dependencies = [
  "bytes",
  "mdns-sd",

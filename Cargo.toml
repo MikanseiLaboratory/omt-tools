@@ -35,7 +35,7 @@ suite-core = { path = "crates/suite-core" }
 omt-media = { path = "crates/omt-media" }
 pattern-generator = { path = "crates/pattern-generator" }
 monitor-bench = { path = "crates/monitor-bench" }
-openmediatransport = { git = "https://github.com/MikanseiLaboratory/openmediatransport-rs", rev = "221f3e2f200f754dbfbe63997c75e2e90d3bc47d", features = ["tokio"] }
+openmediatransport = { git = "https://github.com/MikanseiLaboratory/openmediatransport-rs", rev = "2a0a9d3113e44d7bc3fb72468f05d9e8215b4b6f", features = ["tokio"] }
 gpui = "0.2.2"
 vmx = { git = "https://github.com/MikanseiLaboratory/vmx-rs" }
 anyhow = "1"
