@@ -24,7 +24,7 @@ enum EditTarget {
 
 pub fn run_gpui(title: String, language: Language) -> Result<()> {
     Application::new().run(move |cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(760.0), px(720.0)), cx);
+        let bounds = Bounds::centered(None, size(px(780.0), px(860.0)), cx);
         let title = SharedString::from(title);
         cx.open_window(
             WindowOptions {
@@ -114,7 +114,9 @@ impl ConfigView {
 
     fn save(&mut self, cx: &mut Context<Self>) {
         match self.editor.save() {
-            Ok(()) => {}
+            Ok(()) => {
+                self.editor.status = Some(t(self.language, "config.saved").to_string());
+            }
             Err(e) => {
                 self.editor.status = None;
                 self.editor.error = Some(e);
@@ -126,6 +128,27 @@ impl ConfigView {
     fn reload(&mut self, cx: &mut Context<Self>) {
         self.editor.reload();
         self.editing = EditTarget::None;
+        if self.editor.error.is_none() {
+            self.editor.status = Some(t(self.language, "config.reloaded").to_string());
+        }
+        cx.notify();
+    }
+
+    fn use_dns_sd(&mut self, cx: &mut Context<Self>) {
+        let already_empty = self.editor.discovery_server.trim().is_empty();
+        self.editor.clear_discovery();
+        self.editing = EditTarget::None;
+        self.editor.status = Some(
+            t(
+                self.language,
+                if already_empty {
+                    "config.dns_sd_already"
+                } else {
+                    "config.dns_sd_cleared"
+                },
+            )
+            .to_string(),
+        );
         cx.notify();
     }
 }
@@ -143,6 +166,8 @@ impl Render for ConfigView {
         let can_save = !self.editor.unreadable;
         let extras = self.editor.extras.clone();
         let editing = self.editing;
+        let dns_sd = self.editor.discovery_server.trim().is_empty();
+        let xml_preview = self.editor.preview_xml();
         let mut extra_rows = Vec::new();
         for (i, (k, v)) in extras.iter().enumerate() {
             extra_rows.push(extra_row(cx, lang, i, k, v, editing).into_any_element());
@@ -219,48 +244,91 @@ impl Render for ConfigView {
                         "discovery".into(),
                         t(lang, "config.discovery"),
                         &self.editor.discovery_server,
+                        t(lang, "config.ph_discovery"),
                         self.editing == EditTarget::Discovery,
                         EditTarget::Discovery,
                     ))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_md()
+                                    .bg(if dns_sd { rgb(0x1f3d2a) } else { rgb(0x243041) })
+                                    .text_xs()
+                                    .text_color(if dns_sd { rgb(0x8ad7a0) } else { rgb(0xedf2f7) })
+                                    .child(t(
+                                        lang,
+                                        if dns_sd {
+                                            "config.mode_dns_sd"
+                                        } else {
+                                            "config.mode_unicast"
+                                        },
+                                    )),
+                            )
+                            .child(action_button(
+                                cx,
+                                "dns-sd".into(),
+                                t(lang, "config.clear_discovery"),
+                                rgb(0x243041),
+                                |this, _, cx| this.use_dns_sd(cx),
+                            )),
+                    )
                     .child(
                         div()
                             .text_xs()
                             .opacity(0.65)
                             .child(t(lang, "config.discovery_hint")),
                     )
-                    .child(action_button(
-                        cx,
-                        "dns-sd".into(),
-                        t(lang, "config.clear_discovery"),
-                        rgb(0x243041),
-                        |this, _, cx| {
-                            this.editor.clear_discovery();
-                            cx.notify();
-                        },
-                    ))
-                    .child(section(t(lang, "config.port_start")))
+                    .child(section(t(lang, "config.port_range")))
                     .child(
                         div()
                             .flex()
-                            .gap_3()
+                            .items_end()
+                            .gap_2()
                             .child(field(
                                 cx,
                                 "port-start".into(),
                                 t(lang, "config.port_start"),
                                 &self.editor.port_start,
+                                t(lang, "config.ph_port_start"),
                                 self.editing == EditTarget::PortStart,
                                 EditTarget::PortStart,
                             ))
+                            .child(
+                                div()
+                                    .pb_1()
+                                    .text_sm()
+                                    .opacity(0.8)
+                                    .child(t(lang, "config.port_range_sep")),
+                            )
                             .child(field(
                                 cx,
                                 "port-end".into(),
                                 t(lang, "config.port_end"),
                                 &self.editor.port_end,
+                                t(lang, "config.ph_port_end"),
                                 self.editing == EditTarget::PortEnd,
                                 EditTarget::PortEnd,
                             )),
                     )
+                    .child(
+                        div()
+                            .text_xs()
+                            .opacity(0.65)
+                            .child(t(lang, "config.port_range_hint")),
+                    )
                     .child(section(t(lang, "config.extra")))
+                    .child(
+                        div()
+                            .text_xs()
+                            .opacity(0.65)
+                            .child(t(lang, "config.extra_hint")),
+                    )
                     .children(extra_rows)
                     .child(
                         div()
@@ -272,6 +340,7 @@ impl Render for ConfigView {
                                 "new-key".into(),
                                 t(lang, "config.key"),
                                 &self.editor.new_key,
+                                t(lang, "config.ph_key"),
                                 self.editing == EditTarget::NewKey,
                                 EditTarget::NewKey,
                             ))
@@ -280,6 +349,7 @@ impl Render for ConfigView {
                                 "new-value".into(),
                                 t(lang, "config.value"),
                                 &self.editor.new_value,
+                                t(lang, "config.ph_value"),
                                 self.editing == EditTarget::NewValue,
                                 EditTarget::NewValue,
                             ))
@@ -296,7 +366,15 @@ impl Render for ConfigView {
                                     cx.notify();
                                 },
                             )),
-                    ),
+                    )
+                    .child(section(t(lang, "config.xml_preview")))
+                    .child(
+                        div()
+                            .text_xs()
+                            .opacity(0.65)
+                            .child(t(lang, "config.xml_preview_hint")),
+                    )
+                    .child(xml_preview_box(&xml_preview)),
             )
     }
 }
@@ -318,6 +396,7 @@ fn extra_row(
             SharedString::from(format!("ek-{index}")),
             t(lang, "config.key"),
             key,
+            t(lang, "config.ph_key"),
             editing == EditTarget::ExtraKey(index),
             EditTarget::ExtraKey(index),
         ))
@@ -326,6 +405,7 @@ fn extra_row(
             SharedString::from(format!("ev-{index}")),
             t(lang, "config.value"),
             value,
+            t(lang, "config.ph_value"),
             editing == EditTarget::ExtraValue(index),
             EditTarget::ExtraValue(index),
         ))
@@ -347,13 +427,17 @@ fn field(
     id: SharedString,
     caption: &str,
     value: &str,
+    placeholder: &str,
     editing: bool,
     target: EditTarget,
 ) -> impl IntoElement + use<> {
-    let display = if editing {
-        format!("{value}|")
+    let empty = value.is_empty();
+    let (display, placeholder_shown) = if editing {
+        (format!("{value}|"), false)
+    } else if empty {
+        (placeholder.to_string(), true)
     } else {
-        value.to_string()
+        (value.to_string(), false)
     };
     let caption = SharedString::from(caption.to_string());
     div()
@@ -379,11 +463,42 @@ fn field(
                 .bg(rgb(0x0c1016))
                 .cursor_text()
                 .text_xs()
+                .text_color(if placeholder_shown {
+                    rgb(0x6a7380)
+                } else {
+                    rgb(0xedf2f7)
+                })
                 .child(display)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.begin_edit(target, window, cx);
                 })),
         )
+}
+
+fn xml_preview_box(xml: &str) -> impl IntoElement + use<> {
+    div()
+        .id("xml-preview")
+        .flex()
+        .flex_col()
+        .gap_0()
+        .min_h(px(140.0))
+        .max_h(px(240.0))
+        .overflow_y_scroll()
+        .p_3()
+        .rounded_md()
+        .bg(rgb(0x0c1016))
+        .border_1()
+        .border_color(rgb(0x2a3340))
+        .font(mono_font())
+        .text_xs()
+        .text_color(rgb(0xb8c2cc))
+        .children(xml.lines().map(|line| {
+            div().child(if line.is_empty() {
+                " ".to_string()
+            } else {
+                line.to_string()
+            })
+        }))
 }
 
 fn action_button<F>(
@@ -433,6 +548,25 @@ fn status_line(editor: &SettingsEditor) -> impl IntoElement + use<> {
         div().text_xs().text_color(rgb(0x8ad7a0)).child(ok.clone())
     } else {
         div()
+    }
+}
+
+fn mono_font() -> Font {
+    Font {
+        family: "Consolas".into(),
+        features: FontFeatures::default(),
+        fallbacks: Some(FontFallbacks::from_fonts(vec![
+            "Cascadia Mono".into(),
+            "Cascadia Code".into(),
+            "Menlo".into(),
+            "Monaco".into(),
+            "ui-monospace".into(),
+            "monospace".into(),
+            "Yu Gothic UI".into(),
+            "Segoe UI".into(),
+        ])),
+        weight: FontWeight::default(),
+        style: FontStyle::default(),
     }
 }
 

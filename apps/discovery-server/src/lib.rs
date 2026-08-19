@@ -143,6 +143,47 @@ pub fn parse_bind(bind: &str, port: u16) -> SocketAddr {
     default_bind_addr(port)
 }
 
+/// A selectable listen address (all-interfaces or a NIC unicast IP).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BindChoice {
+    /// Value written into the bind field (`::`, `0.0.0.0`, or a unicast IP).
+    pub bind: String,
+    /// Interface name when this is a NIC address.
+    pub iface: Option<String>,
+}
+
+/// Bind targets: dual-stack any, IPv4 any, then each NIC address.
+pub fn bind_choices() -> Vec<BindChoice> {
+    let mut choices = vec![
+        BindChoice {
+            bind: "::".into(),
+            iface: None,
+        },
+        BindChoice {
+            bind: "0.0.0.0".into(),
+            iface: None,
+        },
+    ];
+    let mut seen = std::collections::BTreeSet::from(["::".to_string(), "0.0.0.0".to_string()]);
+    if let Ok(ifaces) = if_addrs::get_if_addrs() {
+        for iface in ifaces {
+            let ip = iface.ip();
+            if ip.is_unspecified() {
+                continue;
+            }
+            let bind = ip.to_string();
+            if !seen.insert(bind.clone()) {
+                continue;
+            }
+            choices.push(BindChoice {
+                bind,
+                iface: Some(iface.name),
+            });
+        }
+    }
+    choices
+}
+
 fn format_event(event: &DiscoveryServerEvent) -> String {
     match event {
         DiscoveryServerEvent::Started { bind } => format!("started on {bind}"),
@@ -191,6 +232,17 @@ mod tests {
         assert_eq!(
             parse_bind("127.0.0.1", 6400),
             SocketAddr::from(([127, 0, 0, 1], 6400))
+        );
+    }
+
+    #[test]
+    fn bind_choices_include_any_and_local_addrs() {
+        let choices = bind_choices();
+        assert!(choices.iter().any(|c| c.bind == "::" && c.iface.is_none()));
+        assert!(
+            choices
+                .iter()
+                .any(|c| c.bind == "0.0.0.0" && c.iface.is_none())
         );
     }
 

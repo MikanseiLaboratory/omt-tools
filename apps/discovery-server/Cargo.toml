@@ -26,3 +26,4 @@ ctrlc = "3"
 gpui.workspace = true
 openmediatransport.workspace = true
 suite-core.workspace = true
+if-addrs = "0.15"

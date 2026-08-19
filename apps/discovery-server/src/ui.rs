@@ -8,7 +8,7 @@ use gpui::{
     FontStyle, FontWeight, InteractiveElement, KeyDownEvent, SharedString, Timer, Window,
     WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
 };
-use omt_discovery_server::{ServerController, ServerSettings};
+use omt_discovery_server::{BindChoice, ServerController, ServerSettings, bind_choices};
 use suite_core::{
     DiscoveryServerConfig, Language, load_discovery_server_config, save_discovery_server_config, t,
 };
@@ -22,7 +22,7 @@ enum EditTarget {
 
 pub fn run_gpui(title: String, language: Language) -> Result<()> {
     Application::new().run(move |cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(820.0), px(640.0)), cx);
+        let bounds = Bounds::centered(None, size(px(820.0), px(720.0)), cx);
         let title = SharedString::from(title);
         cx.open_window(
             WindowOptions {
@@ -46,6 +46,7 @@ struct ServerView {
     language: Language,
     bind: String,
     port: String,
+    nics: Vec<BindChoice>,
     controller: ServerController,
     editing: EditTarget,
     error: Option<String>,
@@ -65,6 +66,7 @@ impl ServerView {
             language,
             bind: cfg.bind,
             port: cfg.port.to_string(),
+            nics: bind_choices(),
             controller: ServerController::new(settings),
             editing: EditTarget::None,
             error: None,
@@ -79,6 +81,9 @@ impl ServerView {
             Timer::after(Duration::from_millis(200)).await;
             this.update(cx, |this, cx| {
                 this.controller.poll();
+                if !this.controller.is_running() {
+                    this.nics = bind_choices();
+                }
                 this.schedule_tick(cx);
                 cx.notify();
             })
@@ -114,6 +119,20 @@ impl ServerView {
         self.controller.set_settings(settings)?;
         self.persist();
         Ok(())
+    }
+
+    fn select_bind(&mut self, bind: String, cx: &mut Context<Self>) {
+        if self.controller.is_running() {
+            return;
+        }
+        self.bind = bind;
+        self.editing = EditTarget::None;
+        if let Err(e) = self.apply_settings() {
+            self.error = Some(e);
+        } else {
+            self.error = None;
+        }
+        cx.notify();
     }
 
     fn start(&mut self, cx: &mut Context<Self>) {
@@ -238,6 +257,13 @@ impl Render for ServerView {
                     )
                     .child(
                         div()
+                            .text_xs()
+                            .opacity(0.65)
+                            .child(t(lang, "discovery.nic")),
+                    )
+                    .child(nic_chips(cx, lang, &self.nics, &self.bind, running))
+                    .child(
+                        div()
                             .flex()
                             .gap_2()
                             .items_center()
@@ -310,6 +336,59 @@ impl Render for ServerView {
                     .child(event_log(self.controller.events())),
             )
     }
+}
+
+fn nic_chips(
+    cx: &mut Context<ServerView>,
+    lang: Language,
+    nics: &[BindChoice],
+    selected: &str,
+    running: bool,
+) -> impl IntoElement {
+    let selected = selected.trim().to_string();
+    let mut chips = Vec::new();
+    for (i, choice) in nics.iter().cloned().enumerate() {
+        chips.push(nic_chip(cx, lang, i, choice, &selected, running).into_any_element());
+    }
+    div()
+        .flex()
+        .flex_row()
+        .flex_wrap()
+        .gap_2()
+        .children(chips)
+}
+
+fn nic_chip(
+    cx: &mut Context<ServerView>,
+    lang: Language,
+    index: usize,
+    choice: BindChoice,
+    selected: &str,
+    running: bool,
+) -> impl IntoElement {
+    let active = selected == choice.bind;
+    let label = match choice.iface.as_deref() {
+        None if choice.bind == "::" => t(lang, "discovery.nic_all").to_string(),
+        None if choice.bind == "0.0.0.0" => t(lang, "discovery.nic_all_v4").to_string(),
+        Some(name) => format!("{name}  {}", choice.bind),
+        None => choice.bind.clone(),
+    };
+    let bind = choice.bind.clone();
+    div()
+        .id(SharedString::from(format!("nic-{index}")))
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .border_1()
+        .border_color(if active { rgb(0x2f6fed) } else { rgb(0x2a3340) })
+        .bg(if active { rgb(0x1d2b44) } else { rgb(0x243041) })
+        .opacity(if running { 0.55 } else { 1.0 })
+        .cursor_pointer()
+        .text_xs()
+        .child(label)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.select_bind(bind.clone(), cx);
+        }))
 }
 
 fn sources_list(lang: Language, sources: &[openmediatransport::OmtAddress]) -> impl IntoElement {

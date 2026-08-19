@@ -187,6 +187,49 @@ impl SettingsEditor {
             self.extras.remove(index);
         }
     }
+
+    /// XML that [`Self::save`] would write, from the current editor fields.
+    pub fn preview_xml(&self) -> String {
+        let mut values = std::collections::BTreeMap::new();
+        values.insert(
+            KEY_DISCOVERY_SERVER.to_string(),
+            self.discovery_server.trim().to_string(),
+        );
+        values.insert(
+            KEY_NETWORK_PORT_START.to_string(),
+            self.port_start.trim().to_string(),
+        );
+        values.insert(
+            KEY_NETWORK_PORT_END.to_string(),
+            self.port_end.trim().to_string(),
+        );
+        for (key, value) in &self.extras {
+            let key = key.trim();
+            if !key.is_empty() {
+                values.insert(key.to_string(), value.clone());
+            }
+        }
+        let mut out = String::from("<Settings>\n");
+        for (k, v) in values {
+            out.push_str("  <");
+            out.push_str(&k);
+            out.push('>');
+            out.push_str(&escape_xml(&v));
+            out.push_str("</");
+            out.push_str(&k);
+            out.push_str(">\n");
+        }
+        out.push_str("</Settings>\n");
+        out
+    }
+}
+
+fn escape_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 fn parse_port(raw: &str, label: &str) -> Result<u16, String> {
@@ -329,6 +372,24 @@ mod tests {
         editor.save().unwrap();
         let loaded = Settings::from_path(&path);
         assert!(loaded.discovery_server().is_none());
+        cleanup(&path);
+    }
+
+    #[test]
+    fn preview_xml_follows_editor_fields() {
+        let path = temp_path();
+        let mut editor = SettingsEditor::load_from_path(&path);
+        editor.discovery_server.clear();
+        editor.port_start = "6400".into();
+        editor.port_end = "6600".into();
+        editor.new_key = "VendorKey".into();
+        editor.new_value = "keep".into();
+        editor.add_extra().unwrap();
+        let xml = editor.preview_xml();
+        assert!(xml.contains("<DiscoveryServer></DiscoveryServer>"));
+        assert!(xml.contains("<NetworkPortStart>6400</NetworkPortStart>"));
+        assert!(xml.contains("<NetworkPortEnd>6600</NetworkPortEnd>"));
+        assert!(xml.contains("<VendorKey>keep</VendorKey>"));
         cleanup(&path);
     }
 
