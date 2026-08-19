@@ -134,7 +134,9 @@ pub struct SendSession {
     audio: Arc<Mutex<AudioToneConfig>>,
     animate: Arc<AtomicBool>,
     content_epoch: Arc<AtomicU64>,
-    sender: Arc<Mutex<Sender>>,
+    sender: Option<Arc<Mutex<Sender>>>,
+    discovery: Option<Discovery>,
+    source_name: String,
     fps_n: Arc<AtomicI32>,
     fps_d: Arc<AtomicI32>,
     frame_buffer_frames: Arc<AtomicU32>,
@@ -164,18 +166,17 @@ impl SendSession {
             s.set_quality(config.quality);
         }
         let port = sender.lock().port();
-        {
-            let name = config.name.clone();
-            // DNS-SD register is blocking; keep advertisement alive via leak (same as before).
+        let source_name = config.name.clone();
+        let discovery = {
+            let name = source_name.clone();
             runtime::handle()
                 .block_on(runtime::spawn_blocking(move || {
                     let mut discovery = Discovery::new()?;
                     discovery.register(&name, port)?;
-                    std::mem::forget(discovery);
-                    Ok::<(), OmtError>(())
+                    Ok::<_, OmtError>(discovery)
                 }))
-                .map_err(|e| OmtError::Discovery(e.to_string()))??;
-        }
+                .map_err(|e| OmtError::Discovery(e.to_string()))??
+        };
 
         let running = Arc::new(AtomicBool::new(true));
         let stats = Arc::new(Mutex::new(SendStats {
@@ -232,7 +233,9 @@ impl SendSession {
             audio,
             animate,
             content_epoch,
-            sender,
+            sender: Some(sender),
+            discovery: Some(discovery),
+            source_name,
             fps_n,
             fps_d,
             frame_buffer_frames,
@@ -269,7 +272,9 @@ impl SendSession {
 
     /// Hot-update encoding quality without tearing down the sender.
     pub fn set_quality(&self, quality: Quality) {
-        self.sender.lock().set_quality(quality);
+        if let Some(sender) = self.sender.as_ref() {
+            sender.lock().set_quality(quality);
+        }
     }
 
     /// Hot-update output frame rate. Pacing and per-frame metadata follow.
@@ -286,7 +291,8 @@ impl SendSession {
         );
     }
 
-    /// Stop tasks / threads.
+    /// Stop tasks / threads, close TCP peers, and deregister Discovery
+    /// (`<Removed>True</Removed>` / DNS-SD unregister).
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
         if let Some(join) = self.video_join.take() {
@@ -295,6 +301,11 @@ impl SendSession {
         if let Some(join) = self.audio_join.take() {
             let _ = join.join();
         }
+        // libomtnet OMTSend.Dispose: DeregisterAddress, then close listener/channels.
+        if let Some(mut discovery) = self.discovery.take() {
+            let _ = discovery.deregister(&self.source_name);
+        }
+        drop(self.sender.take());
     }
 }
 
