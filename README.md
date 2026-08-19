@@ -17,6 +17,8 @@ Open Media Transport production utilities inspired by NDI Tools.
 | Config Manager | View and edit the global OMT `settings.xml` |
 | Discovery Server | GUI + CLI TCP discovery server (port 6399) |
 
+Official vMix OMT tools for Windows (Desktop Capture, Viewer, Matrix Router, Settings Manager): [vMix Desktop Capture](https://www.vmix.com/software/vmix-desktop-capture.aspx)
+
 Runtime media stack: [`MikanseiLaboratory/openmediatransport-rs`](https://github.com/MikanseiLaboratory/openmediatransport-rs) + [`MikanseiLaboratory/vmx-rs`](https://github.com/MikanseiLaboratory/vmx-rs)
 (VMX SIMD path reporting via `simd_path()`: `avx2` / `sse128` / `neon` / `scalar`).
 
