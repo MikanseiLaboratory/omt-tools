@@ -44,14 +44,15 @@ jobs:
             libasound2-dev \
             libudev-dev \
             libxkbcommon-dev \
+            libxkbcommon-x11-dev \
             libwayland-dev \
             libxcb-render0-dev \
             libxcb-shape0-dev \
             libxcb-xfixes0-dev
       - name: Clippy (workspace libs/tools)
-        run: cargo clippy -p suite-core -p omt-media -p pattern-generator -p monitor-bench -p capture-spike -p omt-studio-monitor -p omt-test-patterns --all-targets -- -D warnings
+        run: cargo clippy -p suite-core -p omt-media -p pattern-generator -p monitor-bench -p capture-spike -p omt-studio-monitor -p omt-test-patterns -p omt-config-manager -p omt-discovery-server --all-targets -- -D warnings
       - name: Test
-        run: cargo test -p suite-core -p omt-media -p pattern-generator -p monitor-bench -p capture-spike
+        run: cargo test -p suite-core -p omt-media -p pattern-generator -p monitor-bench -p capture-spike -p omt-config-manager -p omt-discovery-server
 
   build-tools:
     strategy:
@@ -72,7 +73,7 @@ jobs:
           toolchain: "1.97"
           targets: ${{ matrix.target }}
       - name: Build release tools
-        run: cargo build --release --target ${{ matrix.target }} -p omt-studio-monitor -p omt-test-patterns -p capture-spike
+        run: cargo build --release --target ${{ matrix.target }} -p omt-studio-monitor -p omt-test-patterns -p omt-config-manager -p omt-discovery-server -p capture-spike
       - name: Upload tool artifacts
         uses: actions/upload-artifact@v6
         with:
@@ -80,6 +81,8 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/omt-studio-monitor*
             target/${{ matrix.target }}/release/omt-test-patterns*
+            target/${{ matrix.target }}/release/omt-config-manager*
+            target/${{ matrix.target }}/release/omt-discovery-server*
             target/${{ matrix.target }}/release/omt-screen-capture-spike*
 
   build-windows-arm64:
@@ -92,7 +95,7 @@ jobs:
           toolchain: "1.97"
           targets: aarch64-pc-windows-msvc
       - name: Build Windows Arm64 tools
-        run: cargo build --release --target aarch64-pc-windows-msvc -p omt-studio-monitor -p omt-test-patterns -p capture-spike
+        run: cargo build --release --target aarch64-pc-windows-msvc -p omt-studio-monitor -p omt-test-patterns -p omt-config-manager -p omt-discovery-server -p capture-spike
       - name: Upload tool artifacts
         if: success()
         uses: actions/upload-artifact@v6
@@ -101,6 +104,8 @@ jobs:
           path: |
             target/aarch64-pc-windows-msvc/release/omt-studio-monitor*
             target/aarch64-pc-windows-msvc/release/omt-test-patterns*
+            target/aarch64-pc-windows-msvc/release/omt-config-manager*
+            target/aarch64-pc-windows-msvc/release/omt-discovery-server*
             target/aarch64-pc-windows-msvc/release/omt-screen-capture-spike*
 
   launcher-check:

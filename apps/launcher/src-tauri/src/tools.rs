@@ -1,16 +1,23 @@
 //! Sidecar / local binary launch helpers.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use suite_core::{LaunchOverrides, ToolId, load_config};
 use tauri::{AppHandle, Manager};
+
+/// `ensure-sidecar-placeholders` used to copy `cmd.exe` when a tool had not
+/// been built yet. Tauri then copied that file next to the launcher as
+/// `omt-config-manager.exe`, so Launch opened a console instead of the GUI.
+const MIN_TOOL_BYTES: u64 = 64 * 1024;
 
 /// Parse a launcher / CLI tool id (`studio-monitor`, `test-patterns`, ...).
 pub fn parse_tool_id(tool_id: &str) -> Result<ToolId, String> {
     match tool_id {
         "studio-monitor" => Ok(ToolId::StudioMonitor),
         "test-patterns" => Ok(ToolId::TestPatterns),
+        "config-manager" => Ok(ToolId::ConfigManager),
+        "discovery-server" => Ok(ToolId::DiscoveryServer),
         "screen-capture" => Ok(ToolId::ScreenCapture),
         _ => Err(format!("unknown tool: {tool_id}")),
     }
@@ -29,7 +36,7 @@ pub fn resolve_tool_path(app: &AppHandle, tool: ToolId) -> Result<PathBuf, Strin
             resource.join("binaries").join(format!("{name}.exe")),
         ];
         for path in candidates {
-            if path.exists() {
+            if is_usable_tool_binary(&path) {
                 return Ok(path);
             }
         }
@@ -44,7 +51,7 @@ pub fn resolve_tool_path(app: &AppHandle, tool: ToolId) -> Result<PathBuf, Strin
                 dir.join("binaries").join(name),
                 dir.join("binaries").join(format!("{name}.exe")),
             ] {
-                if path.exists() {
+                if is_usable_tool_binary(&path) {
                     return Ok(path);
                 }
             }
@@ -64,10 +71,10 @@ pub fn resolve_tool_path(app: &AppHandle, tool: ToolId) -> Result<PathBuf, Strin
             .join("target")
             .join(profile)
             .join(format!("{name}.exe"));
-        if path_exe.exists() {
+        if is_usable_tool_binary(&path_exe) {
             return Ok(path_exe);
         }
-        if path.exists() {
+        if is_usable_tool_binary(&path) {
             return Ok(path);
         }
     }
@@ -84,7 +91,7 @@ fn resolve_launch_path(app: &AppHandle, tool: ToolId) -> Result<PathBuf, String>
     #[cfg(target_os = "macos")]
     {
         if let Some(wrapped) = crate::os_shortcuts::macos_wrapped_executable(tool) {
-            if wrapped.exists() {
+            if is_usable_tool_binary(&wrapped) {
                 return Ok(wrapped);
             }
         }
@@ -148,4 +155,50 @@ fn process_running(name: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+fn is_usable_tool_binary(path: &Path) -> bool {
+    let Ok(meta) = path.metadata() else {
+        return false;
+    };
+    if !meta.is_file() || meta.len() < MIN_TOOL_BYTES {
+        return false;
+    }
+    !is_cmd_exe_clone(path, meta.len())
+}
+
+#[cfg(windows)]
+fn is_cmd_exe_clone(path: &Path, len: u64) -> bool {
+    let _ = path;
+    let windir = std::env::var_os("WINDIR").unwrap_or_else(|| r"C:\Windows".into());
+    let cmd = PathBuf::from(windir).join("System32").join("cmd.exe");
+    std::fs::metadata(cmd)
+        .map(|cmd_meta| cmd_meta.len() == len)
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn is_cmd_exe_clone(_path: &Path, _len: u64) -> bool {
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn rejects_tiny_stub_and_missing_path() {
+        assert!(!is_usable_tool_binary(Path::new(
+            "this-file-does-not-exist.exe"
+        )));
+        let dir = std::env::temp_dir();
+        let stub = dir.join("omt-tools-stub-binary.exe");
+        {
+            let mut f = std::fs::File::create(&stub).unwrap();
+            f.write_all(&[b'M', b'Z']).unwrap();
+        }
+        assert!(!is_usable_tool_binary(&stub));
+        let _ = std::fs::remove_file(&stub);
+    }
 }

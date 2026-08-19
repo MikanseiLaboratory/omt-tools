@@ -30,3 +30,6 @@ copy_one() {
 
 copy_one omt-studio-monitor
 copy_one omt-test-patterns
+copy_one omt-config-manager
+copy_one omt-discovery-server-gui
+copy_one omt-discovery-server

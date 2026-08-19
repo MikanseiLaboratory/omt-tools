@@ -222,6 +222,22 @@
                     WorkingDirectory="INSTALLDIR">
                     <ShortcutProperty Key="System.AppUserModel.ID" Value="{{bundle_id}}.test-patterns"/>
                 </Shortcut>
+                <Shortcut Id="ConfigManagerStartMenuShortcut"
+                    Name="Config Manager"
+                    Description="View and edit the global OMT settings.xml"
+                    Target="[INSTALLDIR]omt-config-manager.exe"
+                    Icon="ProductIcon"
+                    WorkingDirectory="INSTALLDIR">
+                    <ShortcutProperty Key="System.AppUserModel.ID" Value="{{bundle_id}}.config-manager"/>
+                </Shortcut>
+                <Shortcut Id="DiscoveryServerStartMenuShortcut"
+                    Name="Discovery Server"
+                    Description="Run an OMT discovery server for networks that block multicast"
+                    Target="[INSTALLDIR]omt-discovery-server-gui.exe"
+                    Icon="ProductIcon"
+                    WorkingDirectory="INSTALLDIR">
+                    <ShortcutProperty Key="System.AppUserModel.ID" Value="{{bundle_id}}.discovery-server"/>
+                </Shortcut>
                 <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
                 <RegistryValue Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="Start Menu Shortcut" Type="integer" Value="1" KeyPath="yes"/>
            </Component>

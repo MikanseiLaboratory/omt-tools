@@ -5,7 +5,7 @@ mod tools;
 
 use serde::{Deserialize, Serialize};
 use suite_core::{
-    Language, SimdCapabilities, SuiteManifest, ThemePreference, ToolId, load_config, save_config,
+    Language, SimdCapabilities, SuiteManifest, ThemePreference, load_config, save_config,
     suite_manifest, t,
 };
 use tauri::Manager;
@@ -91,11 +91,7 @@ fn build_state(app: &tauri::AppHandle) -> Result<LauncherState, String> {
     for info in &manifest.tools {
         let available = tools::tool_available(app, info.id);
         tools.push(ToolCard {
-            id: match info.id {
-                ToolId::StudioMonitor => "studio-monitor".into(),
-                ToolId::TestPatterns => "test-patterns".into(),
-                ToolId::ScreenCapture => "screen-capture".into(),
-            },
+            id: info.id.os_entry_id().to_string(),
             title: t(cfg.language, info.id.title_key()).to_string(),
             description: t(cfg.language, info.id.description_key()).to_string(),
             binary: info.binary.clone(),

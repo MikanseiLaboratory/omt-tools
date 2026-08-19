@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OMT Discovery Server
+Comment=Run an OMT discovery server for networks that block multicast
+Exec=omt-discovery-server-gui
+TryExec=omt-discovery-server-gui
+Icon=OMT Tools
+Terminal=false
+StartupNotify=true
+StartupWMClass=omt-discovery-server-gui
+Categories=AudioVideo;Video;AudioVideoEditing;
+Keywords=OMT;NDI;discovery;server;

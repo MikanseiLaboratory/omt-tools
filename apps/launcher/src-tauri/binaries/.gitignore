@@ -2,6 +2,9 @@
 # Tauri expects:
 #   omt-studio-monitor-<target-triple>[.exe]
 #   omt-test-patterns-<target-triple>[.exe]
+#   omt-config-manager-<target-triple>[.exe]
+#   omt-discovery-server-gui-<target-triple>[.exe]
+#   omt-discovery-server-<target-triple>[.exe]
 *
 !.gitignore
 !README.md

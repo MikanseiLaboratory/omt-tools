@@ -24,3 +24,6 @@ function Copy-One([string]$Name) {
 
 Copy-One omt-studio-monitor
 Copy-One omt-test-patterns
+Copy-One omt-config-manager
+Copy-One omt-discovery-server-gui
+Copy-One omt-discovery-server

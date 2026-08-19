@@ -641,6 +641,9 @@ Section Install
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
   !insertmacro CheckIfAppIsRunning "omt-studio-monitor.exe" "Studio Monitor"
   !insertmacro CheckIfAppIsRunning "omt-test-patterns.exe" "Test Patterns"
+  !insertmacro CheckIfAppIsRunning "omt-config-manager.exe" "Config Manager"
+  !insertmacro CheckIfAppIsRunning "omt-discovery-server-gui.exe" "Discovery Server"
+  !insertmacro CheckIfAppIsRunning "omt-discovery-server.exe" "Discovery Server"
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
@@ -781,6 +784,9 @@ Section Uninstall
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
   !insertmacro CheckIfAppIsRunning "omt-studio-monitor.exe" "Studio Monitor"
   !insertmacro CheckIfAppIsRunning "omt-test-patterns.exe" "Test Patterns"
+  !insertmacro CheckIfAppIsRunning "omt-config-manager.exe" "Config Manager"
+  !insertmacro CheckIfAppIsRunning "omt-discovery-server-gui.exe" "Discovery Server"
+  !insertmacro CheckIfAppIsRunning "omt-discovery-server.exe" "Discovery Server"
 
   ; Delete the app directory and its content from disk
   ; Copy main executable
@@ -973,6 +979,12 @@ Function CreateToolStartMenuShortcuts
   ${If} ${FileExists} "$INSTDIR\omt-test-patterns.exe"
     CreateShortcut "$SMPROGRAMS\$R1\Test Patterns.lnk" "$INSTDIR\omt-test-patterns.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0
   ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\omt-config-manager.exe"
+    CreateShortcut "$SMPROGRAMS\$R1\Config Manager.lnk" "$INSTDIR\omt-config-manager.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\omt-discovery-server-gui.exe"
+    CreateShortcut "$SMPROGRAMS\$R1\Discovery Server.lnk" "$INSTDIR\omt-discovery-server-gui.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0
+  ${EndIf}
 FunctionEnd
 
 Function un.DeleteToolStartMenuShortcuts
@@ -982,8 +994,12 @@ Function un.DeleteToolStartMenuShortcuts
   ${EndIf}
   Delete "$SMPROGRAMS\$R1\Studio Monitor.lnk"
   Delete "$SMPROGRAMS\$R1\Test Patterns.lnk"
+  Delete "$SMPROGRAMS\$R1\Config Manager.lnk"
+  Delete "$SMPROGRAMS\$R1\Discovery Server.lnk"
   Delete "$SMPROGRAMS\${PRODUCTNAME}\Studio Monitor.lnk"
   Delete "$SMPROGRAMS\${PRODUCTNAME}\Test Patterns.lnk"
+  Delete "$SMPROGRAMS\${PRODUCTNAME}\Config Manager.lnk"
+  Delete "$SMPROGRAMS\${PRODUCTNAME}\Discovery Server.lnk"
 FunctionEnd
 
 Function CreateOrUpdateDesktopShortcut

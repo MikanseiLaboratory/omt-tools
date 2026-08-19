@@ -46,7 +46,7 @@ jobs:
         run: ./scripts/ci/prefetch-nsis.ps1
 
       - name: Build sidecar tools
-        run: cargo build --release --target ${{ matrix.rust_target }} -p omt-studio-monitor -p omt-test-patterns
+        run: cargo build --release --target ${{ matrix.rust_target }} -p omt-studio-monitor -p omt-test-patterns -p omt-config-manager -p omt-discovery-server
 
       - name: Prepare sidecars (Windows)
         if: runner.os == 'Windows'

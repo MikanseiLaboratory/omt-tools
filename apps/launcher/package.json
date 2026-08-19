@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "bun@1.2.19",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "bun ../../scripts/prepare-dev-sidecars.js && tauri dev",
     "dev:frontend": "vite",
     "build": "tsc && vite build",
     "tauri": "tauri"
