@@ -56,7 +56,7 @@
       <footer class="footer">
         <div class="footer-left">
           <span id="footer-version-label">Version</span>
-          <span id="footer-version">0.1.0</span>
+          <span id="footer-version">0.1.1</span>
         </div>
         <a class="footer-center" id="footer-site" href="https://github.com/MikanseiLaboratory/omt-tools" target="_blank" rel="noreferrer">
           github.com/MikanseiLaboratory/omt-tools
@@ -70,9 +70,11 @@
           <div class="settings-row">
             <div>
               <div class="settings-kicker" id="version-label">Version</div>
-              <div class="settings-version" id="suite-version">0.1.0</div>
+              <div class="settings-version" id="suite-version">0.1.1</div>
             </div>
           </div>
+          <button type="button" class="primary-btn" id="check-update">Check for updates</button>
+          <p class="settings-note" id="update-status"></p>
           <pre class="settings-manifest" id="manifest-tools"></pre>
         </div>
 
@@ -102,6 +104,17 @@
           <p class="settings-status" id="settings-status"></p>
         </div>
       </aside>
+
+      <div class="dialog-backdrop hidden" id="update-backdrop"></div>
+      <div class="update-dialog hidden" id="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-title">
+        <h2 id="update-title">Update available</h2>
+        <p id="update-body"></p>
+        <pre class="update-notes hidden" id="update-notes"></pre>
+        <div class="dialog-actions">
+          <button type="button" class="primary-btn" id="update-later">Later</button>
+          <button type="button" class="primary-btn" id="update-confirm">Update</button>
+        </div>
+      </div>
 
       <p class="toast hidden" id="status" role="status"></p>
     </div>

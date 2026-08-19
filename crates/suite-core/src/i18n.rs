@@ -120,6 +120,30 @@ pub fn t(lang: Language, key: &str) -> &'static str {
         (Language::English, "tool.unavailable") => "Not installed",
         (Language::Japanese, "tool.unavailable") => "未インストール",
 
+        // Updater
+        (Language::English, "update.check") => "Check for updates",
+        (Language::Japanese, "update.check") => "更新を確認",
+        (Language::English, "update.checking") => "Checking for updates…",
+        (Language::Japanese, "update.checking") => "更新を確認しています…",
+        (Language::English, "update.available.title") => "Update available",
+        (Language::Japanese, "update.available.title") => "更新があります",
+        (Language::English, "update.available.body") => {
+            "Version {version} is available. The app will restart after installation."
+        }
+        (Language::Japanese, "update.available.body") => {
+            "バージョン {version} が利用できます。インストール後にアプリが再起動します。"
+        }
+        (Language::English, "update.install") => "Update",
+        (Language::Japanese, "update.install") => "更新する",
+        (Language::English, "update.later") => "Later",
+        (Language::Japanese, "update.later") => "後で",
+        (Language::English, "update.none") => "You're up to date.",
+        (Language::Japanese, "update.none") => "最新です。",
+        (Language::English, "update.installing") => "Downloading and installing update…",
+        (Language::Japanese, "update.installing") => "更新をダウンロードしてインストールしています…",
+        (Language::English, "update.failed") => "Could not check for updates.",
+        (Language::Japanese, "update.failed") => "更新の確認に失敗しました。",
+
         // Monitor
         (Language::English, "monitor.sources") => "Sources",
         (Language::Japanese, "monitor.sources") => "ソース",
@@ -489,6 +513,8 @@ mod tests {
             "theme",
             "version",
             "simd",
+            "update.check",
+            "update.available.body",
             "tool.studio_monitor",
             "tool.test_patterns",
             "tool.config_manager",
